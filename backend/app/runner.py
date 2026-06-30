@@ -24,6 +24,7 @@ from ..core.clock import RealClock, SimClock
 from ..monitoring import AlertManager, CostTelemetry, Monitor, sinks_from_env
 from ..risk import RiskConfig
 from ..storage import Database
+from .budget import BudgetTracker, budget_risk_config, pln_to_usd
 from .pipeline import Pipeline
 from .report import DailyReport, build_report
 
@@ -46,6 +47,7 @@ class OneWishApp:
         live_cycles: int | None = None,
         poll_interval: float = 2.0,
         alerts: bool = True,
+        budget_pln: float | None = None,
     ) -> None:
         self.mode = mode
         self.steps = steps
@@ -60,6 +62,17 @@ class OneWishApp:
         self.poll_interval = poll_interval
         self.alerts = alerts
         self.telemetry: CostTelemetry | None = None
+        # Fikcyjny budżet (forward paper-trade): ogranicza ekspozycję do budżetu i
+        # śledzi jego wykorzystanie. Tylko paper — nie dotyka realnych pieniędzy.
+        self.budget_tracker: BudgetTracker | None = None
+        if budget_pln is not None:
+            self.budget_usd = pln_to_usd(budget_pln)
+            self.risk_config = budget_risk_config(
+                self.budget_usd, perp_leverage=self.risk_config.perp_leverage,
+                base=self.risk_config)
+            self.budget_tracker = BudgetTracker(self.budget_usd, self.risk_config.perp_leverage)
+            log.info("Budżet fikcyjny: %.0f zł ≈ %.2f$ (cap ekspozycji %.2f$)",
+                     budget_pln, self.budget_usd, self.risk_config.max_total_exposure_usd)
         self.report: DailyReport | None = None
 
     def _build_source(self):
@@ -114,6 +127,11 @@ class OneWishApp:
                          snap["slippage_bps"]["SPOT"]["mean"], snap["slippage_bps"]["PERP"]["mean"],
                          snap["fee_bps"]["SPOT"]["mean"], snap["fee_bps"]["PERP"]["mean"],
                          snap["spread_bps"]["spot"]["mean"], snap["data_lag_ms"]["mean"])
+            if self.budget_tracker is not None:
+                snap = self.budget_tracker.snapshot(pipe.book)
+                log.info("Budżet po sesji: użyte %.2f$ / %.2f$ (%.0f%%), wolne %.2f$",
+                         snap["committed_usd"], snap["budget_usd"],
+                         snap["utilization_pct"], snap["free_usd"])
             if gui_server:
                 await gui_server.stop()
             db.close()
