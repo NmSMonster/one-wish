@@ -21,7 +21,7 @@ from ..adapters.market.synthetic import SyntheticSource
 from ..api.gui_ws import GuiApiServer
 from ..core.bus import EventBus
 from ..core.clock import RealClock, SimClock
-from ..monitoring import AlertManager, Monitor, sinks_from_env
+from ..monitoring import AlertManager, CostTelemetry, Monitor, sinks_from_env
 from ..risk import RiskConfig
 from ..storage import Database
 from .pipeline import Pipeline
@@ -59,6 +59,7 @@ class OneWishApp:
         self.live_cycles = live_cycles
         self.poll_interval = poll_interval
         self.alerts = alerts
+        self.telemetry: CostTelemetry | None = None
         self.report: DailyReport | None = None
 
     def _build_source(self):
@@ -85,6 +86,10 @@ class OneWishApp:
             # bez konfiguracji = tylko log; w live trafią na Telegram/Discord.
             AlertManager(sinks_from_env()).attach(bus)
 
+        # shadow telemetry: realne koszty egzekucji/rynku vs model (obserwacja, bez wpływu)
+        self.telemetry = CostTelemetry()
+        self.telemetry.attach(bus)
+
         gui_server = None
         if self.gui:
             conn = "LIVE" if self.mode == "live" else "SIMULATION"
@@ -102,6 +107,13 @@ class OneWishApp:
             await adapter.run()
         finally:
             self.report = build_report(db, pipe.book)
+            if self.telemetry is not None:
+                snap = self.telemetry.snapshot()
+                log.info("Cost telemetry (shadow): slip_spot=%.2fbps slip_perp=%.2fbps "
+                         "fee_spot=%.2fbps fee_perp=%.2fbps spread_spot=%.2fbps lag=%.0fms",
+                         snap["slippage_bps"]["SPOT"]["mean"], snap["slippage_bps"]["PERP"]["mean"],
+                         snap["fee_bps"]["SPOT"]["mean"], snap["fee_bps"]["PERP"]["mean"],
+                         snap["spread_bps"]["spot"]["mean"], snap["data_lag_ms"]["mean"])
             if gui_server:
                 await gui_server.stop()
             db.close()
