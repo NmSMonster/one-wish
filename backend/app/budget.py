@@ -45,6 +45,61 @@ def budget_risk_config(budget_usd: float, *, perp_leverage: float = 3.0,
     return replace(cfg, **overrides) if overrides else cfg
 
 
+def wallet_split(budget_usd: float, perp_leverage: float = 3.0) -> dict:
+    """Podział budżetu na portfel SPOT vs FUTURES dla pełnego wykorzystania w parach
+    delta-neutral. Spot trzyma pełny nominał nogi long (N), futures depozyt nogi short
+    (N/lev). Przy N = B/(1+1/lev): spot = B·lev/(lev+1), futures = B/(lev+1)."""
+    if perp_leverage <= 0:
+        return {"spot": budget_usd, "futures": 0.0}
+    n = budget_usd / (1.0 + 1.0 / perp_leverage)
+    return {"spot": n, "futures": n / perp_leverage}
+
+
+@dataclass
+class TwoWalletLedger:
+    """Model DWÓCH portfeli (spot vs futures — na Binance to osobne salda). Pilnuje, że
+    nowa para zmieści się w OBU: noga long potrzebuje gotówki spot, noga short depozytu
+    futures. Sam łączny budżet nie wystarczy — trzeba mieć środki we właściwym portfelu."""
+    spot_balance: float
+    futures_balance: float
+    perp_leverage: float = 3.0
+
+    @classmethod
+    def from_budget(cls, budget_usd: float, perp_leverage: float = 3.0) -> "TwoWalletLedger":
+        s = wallet_split(budget_usd, perp_leverage)
+        return cls(s["spot"], s["futures"], perp_leverage)
+
+    def committed(self, book: PositionBook) -> dict:
+        spot = fut = 0.0
+        for _, p in book.positions.items():
+            if not p.is_open:
+                continue
+            spot += abs(p.spot_qty) * p.spot_entry
+            fut += abs(p.perp_qty) * p.perp_entry / self.perp_leverage
+        return {"spot": spot, "futures": fut}
+
+    def free(self, book: PositionBook) -> dict:
+        c = self.committed(book)
+        return {"spot": max(0.0, self.spot_balance - c["spot"]),
+                "futures": max(0.0, self.futures_balance - c["futures"])}
+
+    def can_open(self, notional_usd: float, book: PositionBook,
+                 *, perp_leverage: float | None = None) -> bool:
+        lev = perp_leverage or self.perp_leverage
+        free = self.free(book)
+        spot_need = notional_usd
+        fut_need = notional_usd / lev if lev > 0 else notional_usd
+        return spot_need <= free["spot"] + 1e-9 and fut_need <= free["futures"] + 1e-9
+
+    def snapshot(self, book: PositionBook) -> dict:
+        c = self.committed(book)
+        f = self.free(book)
+        return {
+            "spot": {"balance": self.spot_balance, "committed": c["spot"], "free": f["spot"]},
+            "futures": {"balance": self.futures_balance, "committed": c["futures"], "free": f["futures"]},
+        }
+
+
 @dataclass
 class BudgetTracker:
     """Śledzi, ile z fikcyjnego budżetu jest związane w otwartych pozycjach i ile

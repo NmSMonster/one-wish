@@ -4,8 +4,10 @@ import asyncio
 from backend.app.budget import (
     USD_PER_PLN,
     BudgetTracker,
+    TwoWalletLedger,
     budget_risk_config,
     pln_to_usd,
+    wallet_split,
 )
 from backend.app.runner import OneWishApp
 from backend.core.types import Asset, Fill, Leg, Side
@@ -102,3 +104,45 @@ def test_runner_with_budget_runs_green():
     app = OneWishApp(mode="synthetic", steps=120, seed=3, gui=False, budget_pln=150.0)
     report = asyncio.run(app.run())
     assert report.counts.get("MARKET_TICK", 0) > 0   # przeszło bez wyjątku z budżetem
+
+
+# -- dwa portfele (spot vs futures) ----------------------------------------- #
+def test_wallet_split_sums_to_budget():
+    s = wallet_split(40.0, perp_leverage=3.0)
+    assert abs(s["spot"] - 30.0) < 1e-9          # 40*3/4
+    assert abs(s["futures"] - 10.0) < 1e-9       # 40/4
+    assert abs(s["spot"] + s["futures"] - 40.0) < 1e-9
+
+
+def test_two_wallet_from_budget_matches_split():
+    led = TwoWalletLedger.from_budget(40.0, perp_leverage=3.0)
+    assert abs(led.spot_balance - 30.0) < 1e-9
+    assert abs(led.futures_balance - 10.0) < 1e-9
+
+
+def test_two_wallet_committed_splits_legs():
+    led = TwoWalletLedger(spot_balance=30.0, futures_balance=10.0, perp_leverage=3.0)
+    book = _book_with_pair(notional=15.0, entry=1.0)   # spot 15, futures 15/3=5
+    c = led.committed(book)
+    assert abs(c["spot"] - 15.0) < 1e-9
+    assert abs(c["futures"] - 5.0) < 1e-9
+    f = led.free(book)
+    assert abs(f["spot"] - 15.0) < 1e-9
+    assert abs(f["futures"] - 5.0) < 1e-9
+
+
+def test_two_wallet_can_open_requires_both_wallets():
+    # spot bogaty, futures pusty → mimo wolnej gotówki spot NIE wolno otwierać
+    led = TwoWalletLedger(spot_balance=100.0, futures_balance=0.0, perp_leverage=3.0)
+    assert not led.can_open(10.0, PositionBook())
+    # oba portfele wystarczające
+    led2 = TwoWalletLedger(spot_balance=10.0, futures_balance=4.0, perp_leverage=3.0)
+    assert led2.can_open(10.0, PositionBook())     # potrzeba spot 10, futures 3.33
+    assert not led2.can_open(13.0, PositionBook())  # futures 4.33 > 4
+
+
+def test_two_wallet_snapshot_structure():
+    led = TwoWalletLedger.from_budget(37.5, perp_leverage=3.0)
+    snap = led.snapshot(PositionBook())
+    assert set(snap) == {"spot", "futures"}
+    assert set(snap["spot"]) == {"balance", "committed", "free"}
