@@ -9,7 +9,7 @@
 
 One Wish to **realny bot tradingowy**: delta-neutral **basis/funding carry** na
 Binance (long spot + short perp, inkasowanie funding). Backend Python, event-driven,
-**158 testów pytest zielonych**. Edge (carry) **zwalidowany na ~roku realnej historii
+**172 testy pytest zielone**. Edge (carry) **zwalidowany na ~roku realnej historii
 funding (~+18%/rok delta-neutral po prowizjach)**. Bot poprawnie wchodzi w carry na
 realnych danych. Realny handel jest **domyślnie zablokowany** — jesteśmy w fazie
 paper/walidacji, przed transportem na testnecie i pilotem.
@@ -29,7 +29,7 @@ Folder roboczy: katalog repo (na GitHubie). Testy: `python -m pytest -q`.
   prowizje — naprawione).
 - **Tryb „dislocation"** (opcjonalny, do badań): wejście na perp-rich spike.
 
-## 2. Status — co działa (158 testów zielonych)
+## 2. Status — co działa (172 testy zielone)
 
 Pełny pipeline event-driven (`backend/`):
 
@@ -104,15 +104,15 @@ backend/
                universe (ranking aktywów), recorder (zapis ticków)
 scripts/       study_funding, run_backtest, run_edge_validation, run_paper_live,
                record_market, record_liquidations, scan_universe
-tests/         pełna suita pytest (158)
+tests/         pełna suita pytest (172)
 Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md,
-               CARRY_VERDICT.md, UNIVERSE_SCAN.md, DATA_CONTRACT.md, ten HANDOFF.md
+               CARRY_VERDICT.md, UNIVERSE_SCAN.md, DATA_CONTRACT.md, RUNBOOK.md, ten HANDOFF.md
 ```
 
 ## 6. Jak uruchomić
 
 ```
-python -m pytest -q                              # 158 testów
+python -m pytest -q                              # 172 testy
 python scripts/study_funding.py                  # werdykt carry na historii funding (natychmiast)
 python scripts/scan_universe.py --top 25         # ranking aktywów po carry
 python scripts/run_backtest.py                   # backtest carry vs scalp (synthetic)
@@ -140,12 +140,14 @@ Z przeglądów Codexa „survive live" — zrobione: P0 OrderManager, #4 kwantyz
   flatten-noop. Wciąż TODO: stale feed mid-sequence, DB write fail, lost-ack
   (lost-ack świadomie odłożony do live transport — wymaga reconcile-before-retry,
   inaczej ryzyko podwójnego filla).
+- ✅ **#8 alerty poza GUI + runbook** — `AlertManager` (backend/monitoring/alerts.py):
+  pluggable sinki (Log/Buffer/Webhook), próg severity, throttling per (rodzaj,aktywo),
+  CRITICAL nigdy nietłumiony; konfiguracja z env (Discord/Telegram), sekrety tylko
+  z env. Wpięte do runnera. Reaguje na margin/kill/emergency/circuit/stale/lag/reject.
+  Runbook operatora: `RUNBOOK.md`.
 
 **Zostało (buildable-now):**
 
-4. **#8 alerty poza GUI + runbook** — Telegram/Discord/email (orphan_leg_age,
-   net_delta, margin_health, funding divergence, data_lag, kill_state) + runbook
-   operatora.
 5. **#3 funding reconciliation** — ledger realnego funding z konta vs model (z kluczami).
 6. **#2 cost telemetry/shadow** — pomiar realnego spreadu/poślizgu/latencji.
 7. **Wpięcie rozszerzonego uniwersum do live** — dodać DOGE/ZEC/VELVET/TAC/HYPE

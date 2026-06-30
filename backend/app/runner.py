@@ -21,7 +21,7 @@ from ..adapters.market.synthetic import SyntheticSource
 from ..api.gui_ws import GuiApiServer
 from ..core.bus import EventBus
 from ..core.clock import RealClock, SimClock
-from ..monitoring import Monitor
+from ..monitoring import AlertManager, Monitor, sinks_from_env
 from ..risk import RiskConfig
 from ..storage import Database
 from .pipeline import Pipeline
@@ -45,6 +45,7 @@ class OneWishApp:
         notional_usd: float = 200.0,
         live_cycles: int | None = None,
         poll_interval: float = 2.0,
+        alerts: bool = True,
     ) -> None:
         self.mode = mode
         self.steps = steps
@@ -57,6 +58,7 @@ class OneWishApp:
         self.notional_usd = notional_usd
         self.live_cycles = live_cycles
         self.poll_interval = poll_interval
+        self.alerts = alerts
         self.report: DailyReport | None = None
 
     def _build_source(self):
@@ -77,6 +79,11 @@ class OneWishApp:
 
         monitor = Monitor(bus, max_daily_loss_usd=self.risk_config.max_daily_loss_usd, clock=clock)
         monitor.attach(bus)
+
+        if self.alerts:
+            # alerty operatora poza GUI (margin/kill/emergency/stale...). Sinki z env:
+            # bez konfiguracji = tylko log; w live trafią na Telegram/Discord.
+            AlertManager(sinks_from_env()).attach(bus)
 
         gui_server = None
         if self.gui:
