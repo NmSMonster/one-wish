@@ -125,7 +125,12 @@ DEFAULT_MAINTENANCE_BY_ASSET: dict = {}   # uzupełniane niżej z mapą stringó
 
 def _build_default_maintenance() -> dict:
     from ..core.types import Asset as _Asset
-    table = {"BTC": 0.004, "ETH": 0.005, "SOL": 0.010, "XRP": 0.010}
+    table = {
+        "BTC": 0.004, "ETH": 0.005, "SOL": 0.010, "XRP": 0.010,
+        # rozszerzone uniwersum — wyższe (konserwatywne) brackety dla mniej płynnych/
+        # nowszych altów; lepiej przesadzić z bezpieczeństwem nogi short.
+        "DOGE": 0.010, "ZEC": 0.015, "VELVET": 0.020, "TAC": 0.020, "HYPE": 0.015,
+    }
     out: dict = {}
     for name, rate in table.items():
         try:

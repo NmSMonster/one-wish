@@ -20,6 +20,12 @@ _DEFAULT_PRICES = {
     Asset.ETH: 3_000.0,
     Asset.SOL: 150.0,
     Asset.XRP: 0.60,
+    # rozszerzone uniwersum — przybliżone ceny TYLKO dla syntetycznego demo/testów
+    Asset.DOGE: 0.16,
+    Asset.ZEC: 50.0,
+    Asset.VELVET: 5.0,
+    Asset.TAC: 1.0,
+    Asset.HYPE: 35.0,
 }
 
 

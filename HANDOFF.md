@@ -9,7 +9,7 @@
 
 One Wish to **realny bot tradingowy**: delta-neutral **basis/funding carry** na
 Binance (long spot + short perp, inkasowanie funding). Backend Python, event-driven,
-**195 testów pytest zielonych**. Edge (carry) **zwalidowany na ~roku realnej historii
+**199 testów pytest zielonych**. Edge (carry) **zwalidowany na ~roku realnej historii
 funding (~+18%/rok delta-neutral po prowizjach)**. Bot poprawnie wchodzi w carry na
 realnych danych. Realny handel jest **domyślnie zablokowany** — jesteśmy w fazie
 paper/walidacji, przed transportem na testnecie i pilotem.
@@ -29,7 +29,7 @@ Folder roboczy: katalog repo (na GitHubie). Testy: `python -m pytest -q`.
   prowizje — naprawione).
 - **Tryb „dislocation"** (opcjonalny, do badań): wejście na perp-rich spike.
 
-## 2. Status — co działa (195 testów zielonych)
+## 2. Status — co działa (199 testów zielonych)
 
 Pełny pipeline event-driven (`backend/`):
 
@@ -104,7 +104,7 @@ backend/
                universe (ranking aktywów), recorder (zapis ticków)
 scripts/       study_funding, run_backtest, run_edge_validation, run_paper_live,
                record_market, record_liquidations, scan_universe, run_testnet_smoke
-tests/         pełna suita pytest (195)
+tests/         pełna suita pytest (199)
 Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md,
                CARRY_VERDICT.md, UNIVERSE_SCAN.md, DATA_CONTRACT.md, RUNBOOK.md, ten HANDOFF.md
 ```
@@ -112,7 +112,7 @@ Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md
 ## 6. Jak uruchomić
 
 ```
-python -m pytest -q                              # 195 testów
+python -m pytest -q                              # 199 testów
 python scripts/study_funding.py                  # werdykt carry na historii funding (natychmiast)
 python scripts/scan_universe.py --top 25         # ranking aktywów po carry
 python scripts/run_backtest.py                   # backtest carry vs scalp (synthetic)
@@ -159,26 +159,29 @@ Z przeglądów Codexa „survive live" — zrobione: P0 OrderManager, #4 kwantyz
   (wymaga kluczy TESTNET z env). Jedyny styk I/O (`_signed_request`) izolowany i
   przetestowany przez stub (zero sieci w testach). Lost-ack nadal TODO (reconcile-
   before-retry) przed realnym pilotem.
+- ✅ **Rozszerzone uniwersum (backend)** — DOGE/ZEC/VELVET/TAC/HYPE dodane do
+  `Asset` enum + `BINANCE_SYMBOL` + `ASSETS` (kolejność deterministyczna), brackety
+  maintenance (margin.py: alty konserwatywnie wyżej) i ceny demo (synthetic). Test
+  spójności pilnuje, że każde aktywo ma symbol/bracket/cenę. **TODO (Codex):** lista
+  aktywów + kolory w GUI. UWAGA sizing: perp minNotional BTC $50 / ETH $20 — przy
+  małym budżecie celuj w tańsze alty (DOGE/XRP).
 
 **Zostało (buildable-now):**
 
 5. **#3 funding reconciliation** — ledger realnego funding z konta vs model (z kluczami).
    Teraz możliwe na bazie `account_state()`/userTrades testnet.
-7. **Wpięcie rozszerzonego uniwersum do live** — dodać DOGE/ZEC/VELVET/TAC/HYPE
-   (z UNIVERSE_SCAN.md); rusza Asset enum (core/types) + listę aktywów w GUI (Codex).
-   Sizing licz w wielokrotnościach kroku PERPA (perp minNotional BTC $50, ETH $20!).
 8. **Lost-ack handling** — reconcile-before-retry w OrderManagerze (zapytaj o stan
    zlecenia po coid przed ponowieniem), żeby uniknąć podwójnego filla. Wymagane przed
    realnym pilotem live.
 9. **⭐ DECYZJA WŁAŚCICIELA: forward paper-trade na ŻYWYM rynku z fikcyjnym budżetem
-   ~50 zł.** Gdy reszta gotowa: puścić bota na ŻYWYCH danych Binance (read-only),
-   ale z egzekucją PAPIEROWĄ i fikcyjnym kapitałem startowym ~50 zł (≈ $12–13) —
+   ~150 zł.** Gdy reszta gotowa: puścić bota na ŻYWYCH danych Binance (read-only),
+   ale z egzekucją PAPIEROWĄ i fikcyjnym kapitałem startowym ~150 zł (≈ $37–38) —
    zobaczyć, jak radzi sobie w realnych warunkach BEZ ryzyka pieniędzy. To NIE jest
    mainnet/realny handel, to paper na żywym rynku (`mode="live"` używa
    BinancePublicSource + PaperBroker; trzeba dodać limit kapitału = budżet i tracking
-   „ile z 50 zł zostało"). UWAGA na sizing: perp minNotional BTC $50 / ETH $20 —
-   przy budżecie 50 zł trzeba tańszego aktywa lub świadomości, że zmieści się tylko
-   1 mała para. Cel: uczciwy test zachowania przed jakimkolwiek mainnetem.
+   „ile z 150 zł zostało"). UWAGA na sizing: perp minNotional BTC $50 / ETH $20 —
+   przy 150 zł (~$37) mieści się ~1 para na tańszym alcie (DOGE/XRP); BTC poza
+   zasięgiem. Cel: uczciwy test zachowania przed jakimkolwiek mainnetem.
 10. **(potem, po pozytywnym pilocie na testnecie + paper-live)** kontrolowany pilot
     live na minimalnych stawkach (`allow_mainnet=True`, świadoma decyzja właściciela).
 

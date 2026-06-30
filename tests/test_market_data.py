@@ -2,7 +2,9 @@
 from collections import defaultdict
 
 from backend.adapters.market.binance_public import BinancePublicSource, predict_funding
-from backend.core.types import Asset, MarketTick
+from backend.adapters.market.synthetic import _DEFAULT_PRICES
+from backend.core.types import ASSETS, BINANCE_SYMBOL, Asset, MarketTick
+from backend.risk.margin import DEFAULT_MAINTENANCE_BY_ASSET
 
 
 def _tick(**kw) -> MarketTick:
@@ -46,6 +48,34 @@ def test_market_tick_new_fields_default_zero():
 def test_market_tick_premium_bps():
     t = _tick(mark_price=100.2)           # (100.2-100)/100 = 0.002 = 20 bps
     assert abs(t.premium_bps - 20.0) < 1e-6
+
+
+# -- spójność rozszerzonego uniwersum --------------------------------------- #
+_EXPANDED = {Asset.DOGE, Asset.ZEC, Asset.VELVET, Asset.TAC, Asset.HYPE}
+
+
+def test_expanded_universe_present():
+    assert _EXPANDED.issubset(set(ASSETS))
+    assert _EXPANDED.issubset(set(Asset))
+
+
+def test_every_asset_has_binance_symbol_usdt():
+    for a in ASSETS:
+        assert a in BINANCE_SYMBOL
+        assert BINANCE_SYMBOL[a].endswith("USDT")
+
+
+def test_every_asset_has_maintenance_and_synth_price():
+    for a in ASSETS:
+        assert a in DEFAULT_MAINTENANCE_BY_ASSET, f"brak bracketu maintenance dla {a}"
+        assert DEFAULT_MAINTENANCE_BY_ASSET[a] > 0
+        assert a in _DEFAULT_PRICES, f"brak ceny demo dla {a}"
+
+
+def test_riskier_alts_have_higher_maintenance_than_btc():
+    # nowsze/mniej płynne alty muszą mieć NIE niższy bracket niż BTC (konserwatywnie)
+    for a in _EXPANDED:
+        assert DEFAULT_MAINTENANCE_BY_ASSET[a] >= DEFAULT_MAINTENANCE_BY_ASSET[Asset.BTC]
 
 
 # -- Optymalizacja recordera: kadencja cen vs OI/głębokość ------------------ #

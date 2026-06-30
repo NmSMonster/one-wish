@@ -20,10 +20,21 @@ class Asset(str, Enum):
     ETH = "ETH"
     SOL = "SOL"
     XRP = "XRP"
+    # Rozszerzone uniwersum (UNIVERSE_SCAN.md: wysoki, trwały funding + płynność ≥ $50M).
+    # Wyższy funding alta zwykle = wyższe ryzyko — chronią płynność, margin watchdog i
+    # konserwatywne brackety maintenance (backend/risk/margin.py).
+    DOGE = "DOGE"
+    ZEC = "ZEC"
+    VELVET = "VELVET"
+    TAC = "TAC"
+    HYPE = "HYPE"
 
 
 #: Stała lista obsługiwanych aktywów (kolejność deterministyczna).
-ASSETS: tuple["Asset", ...] = (Asset.BTC, Asset.ETH, Asset.SOL, Asset.XRP)
+ASSETS: tuple["Asset", ...] = (
+    Asset.BTC, Asset.ETH, Asset.SOL, Asset.XRP,
+    Asset.DOGE, Asset.ZEC, Asset.VELVET, Asset.TAC, Asset.HYPE,
+)
 
 #: Mapowanie na symbole Binance (spot i USDT-M perp mają ten sam symbol).
 BINANCE_SYMBOL: dict["Asset", str] = {
@@ -31,6 +42,11 @@ BINANCE_SYMBOL: dict["Asset", str] = {
     Asset.ETH: "ETHUSDT",
     Asset.SOL: "SOLUSDT",
     Asset.XRP: "XRPUSDT",
+    Asset.DOGE: "DOGEUSDT",
+    Asset.ZEC: "ZECUSDT",
+    Asset.VELVET: "VELVETUSDT",
+    Asset.TAC: "TACUSDT",
+    Asset.HYPE: "HYPEUSDT",
 }
 
 
