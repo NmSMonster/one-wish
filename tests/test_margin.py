@@ -5,7 +5,12 @@ from backend.core.bus import EventBus
 from backend.core.events import Event, EventType
 from backend.core.types import Asset, Fill, Leg, MarketTick, Side, TradeIntent
 from backend.execution import PositionBook
-from backend.risk.margin import MarginModel, MarginWatchdog
+from backend.risk.margin import (
+    DEFAULT_MAINTENANCE_BY_ASSET,
+    MarginModel,
+    MarginStressTester,
+    MarginWatchdog,
+)
 
 
 def _tick(perp, mark=None) -> MarketTick:
@@ -89,3 +94,78 @@ def test_watchdog_warn_zone_emits_warning_only():
     asyncio.run(bus.publish(Event(EventType.MARKET_TICK, 2.0, "s", payload=_tick(131.0))))
     assert warnings and warnings[-1]["action"] == "warn"
     assert not any(i.action == "CLOSE" for i in intents)   # warn nie zamyka
+
+
+# -- stress-test marginu (#5) ----------------------------------------------- #
+def test_stress_safe_position_reports_safe():
+    # short 10@100, lev 3: nawet +30% daje health ~5.1 → bezpiecznie
+    tester = MarginStressTester(_book_with_short(), MarginModel(0.005),
+                                perp_leverage=3.0, maintenance_by_asset={})
+    rep = tester.stress()
+    assert "BTC" in rep["positions"]
+    rows = rep["positions"]["BTC"]["shocks"]
+    assert [r["shock"] for r in rows] == [0.10, 0.20, 0.30]
+    healths = [r["health"] for r in rows]
+    assert healths[0] > healths[1] > healths[2]            # zdrowie spada z szokiem
+    assert rep["summary"]["safe"] is True
+    assert rep["summary"]["min_health"] > 1.3
+    assert all(rep["summary"]["liquidation_at"][s] == [] for s in (0.10, 0.20, 0.30))
+
+
+def test_stress_high_leverage_flags_liquidation_at_30():
+    # lev 4: +30% → equity ujemny → likwidacja; +10/20% bezpieczne
+    tester = MarginStressTester(_book_with_short(), MarginModel(0.005),
+                                perp_leverage=4.0, maintenance_by_asset={})
+    rep = tester.stress()
+    assert rep["summary"]["liquidation_at"][0.30] == ["BTC"]
+    assert rep["summary"]["liquidation_at"][0.10] == []
+    assert rep["summary"]["liquidation_at"][0.20] == []
+    assert rep["summary"]["safe"] is False
+
+
+def test_stress_flatten_flags_before_liquidation():
+    # szeroki flatten_health: +30% (health ~5.1) domknąłby się, ale NIE jest likwidacją
+    tester = MarginStressTester(_book_with_short(), MarginModel(0.005),
+                                perp_leverage=3.0, flatten_health=6.0,
+                                maintenance_by_asset={})
+    rep = tester.stress()
+    assert rep["summary"]["flatten_at"][0.30] == ["BTC"]
+    assert rep["summary"]["liquidation_at"][0.30] == []    # domknięcie ≠ likwidacja
+    assert rep["summary"]["safe"] is False
+
+
+def test_stress_uses_current_marks_not_entry():
+    # bieżący mark 120 (już +20% od entry) → szok liczony OD 120, zdrowie niższe
+    book = _book_with_short()
+    tester = MarginStressTester(book, MarginModel(0.005), perp_leverage=3.0,
+                                maintenance_by_asset={})
+    at_entry = tester.stress()["positions"]["BTC"]["shocks"][0]["health"]
+    at_mark = tester.stress({Asset.BTC: 120.0})
+    assert at_mark["positions"]["BTC"]["current_mark"] == 120.0
+    assert at_mark["positions"]["BTC"]["shocks"][0]["health"] < at_entry
+
+
+def test_stress_per_symbol_maintenance_rate_applied():
+    book = _book_with_short()
+    low = MarginStressTester(book, MarginModel(0.005), perp_leverage=3.0,
+                             maintenance_by_asset={Asset.BTC: 0.005}).stress()
+    high = MarginStressTester(book, MarginModel(0.005), perp_leverage=3.0,
+                              maintenance_by_asset={Asset.BTC: 0.02}).stress()
+    assert high["positions"]["BTC"]["maintenance_rate"] == 0.02
+    # wyższy maintenance rate → niższe zdrowie przy tym samym szoku
+    assert (high["positions"]["BTC"]["shocks"][0]["health"]
+            < low["positions"]["BTC"]["shocks"][0]["health"])
+
+
+def test_stress_default_maintenance_table_used():
+    rep = MarginStressTester(_book_with_short(), MarginModel(0.005),
+                             perp_leverage=3.0).stress()
+    assert DEFAULT_MAINTENANCE_BY_ASSET[Asset.BTC] == 0.004
+    assert rep["positions"]["BTC"]["maintenance_rate"] == 0.004   # tabela domyślna
+
+
+def test_stress_empty_book_is_safe():
+    rep = MarginStressTester(PositionBook(), MarginModel(0.005)).stress()
+    assert rep["positions"] == {}
+    assert rep["summary"]["safe"] is True
+    assert rep["summary"]["min_health"] == float("inf")
