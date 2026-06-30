@@ -9,7 +9,7 @@
 
 One Wish to **realny bot tradingowy**: delta-neutral **basis/funding carry** na
 Binance (long spot + short perp, inkasowanie funding). Backend Python, event-driven,
-**182 testy pytest zielone**. Edge (carry) **zwalidowany na ~roku realnej historii
+**184 testy pytest zielone**. Edge (carry) **zwalidowany na ~roku realnej historii
 funding (~+18%/rok delta-neutral po prowizjach)**. Bot poprawnie wchodzi w carry na
 realnych danych. Realny handel jest **domyślnie zablokowany** — jesteśmy w fazie
 paper/walidacji, przed transportem na testnecie i pilotem.
@@ -29,7 +29,7 @@ Folder roboczy: katalog repo (na GitHubie). Testy: `python -m pytest -q`.
   prowizje — naprawione).
 - **Tryb „dislocation"** (opcjonalny, do badań): wejście na perp-rich spike.
 
-## 2. Status — co działa (182 testy zielone)
+## 2. Status — co działa (184 testy zielone)
 
 Pełny pipeline event-driven (`backend/`):
 
@@ -104,7 +104,7 @@ backend/
                universe (ranking aktywów), recorder (zapis ticków)
 scripts/       study_funding, run_backtest, run_edge_validation, run_paper_live,
                record_market, record_liquidations, scan_universe
-tests/         pełna suita pytest (182)
+tests/         pełna suita pytest (184)
 Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md,
                CARRY_VERDICT.md, UNIVERSE_SCAN.md, DATA_CONTRACT.md, RUNBOOK.md, ten HANDOFF.md
 ```
@@ -112,7 +112,7 @@ Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md
 ## 6. Jak uruchomić
 
 ```
-python -m pytest -q                              # 182 testy
+python -m pytest -q                              # 184 testy
 python scripts/study_funding.py                  # werdykt carry na historii funding (natychmiast)
 python scripts/scan_universe.py --top 25         # ranking aktywów po carry
 python scripts/run_backtest.py                   # backtest carry vs scalp (synthetic)
@@ -135,11 +135,11 @@ Z przeglądów Codexa „survive live" — zrobione: P0 OrderManager, #4 kwantyz
   pod ruchem +10/20/30%, per-symbol maintenance brackets (`MarginModel.mmr`),
   raport per pozycja + summary (likwidacja/flatten/safe). Wciąż TODO: pełny model
   gotówki spot-wallet vs futures-wallet (alokacja kapitału między nogami).
-- ◑ **#7 chaos-testy (część)** — dodane: martwa noga (perp nie domyka), mieszany
-  chaos spot-partial+perp-dead, restart między nogami + recovery do flat,
-  flatten-noop. Wciąż TODO: stale feed mid-sequence, DB write fail, lost-ack
-  (lost-ack świadomie odłożony do live transport — wymaga reconcile-before-retry,
-  inaczej ryzyko podwójnego filla).
+- ✅ **#7 chaos-testy** — martwa noga (perp nie domyka), mieszany chaos
+  spot-partial+perp-dead, restart między nogami + recovery do flat, flatten-noop,
+  stale feed mid-sequence → EMERGENCY_STOP → flatten (E2E), DB write fail izolowany
+  (awaria zapisu nie zabija szyny). Lost-ack świadomie odłożony do live transport
+  (wymaga reconcile-before-retry, inaczej ryzyko podwójnego filla).
 - ✅ **#8 alerty poza GUI + runbook** — `AlertManager` (backend/monitoring/alerts.py):
   pluggable sinki (Log/Buffer/Webhook), próg severity, throttling per (rodzaj,aktywo),
   CRITICAL nigdy nietłumiony; konfiguracja z env (Discord/Telegram), sekrety tylko

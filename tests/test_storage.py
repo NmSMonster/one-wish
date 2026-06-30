@@ -47,3 +47,30 @@ def test_db_event_payload_serialized():
     assert len(evs) == 1
     assert json.loads(evs[0]["payload"])["reason"] == "limit dzienny"
     db.close()
+
+
+# -- chaos #7: awaria zapisu DB nie może zabić bota ------------------------- #
+def test_db_write_failure_is_isolated_and_does_not_crash_bus():
+    import sqlite3
+
+    bus = EventBus()
+    db = Database()
+    db.attach(bus)
+
+    # po inicjalizacji schematu psujemy każdy zapis (np. dysk pełny / lock).
+    # sqlite3.Connection.execute jest read-only, więc podmieniamy całe połączenie.
+    class _BoomConn:
+        def execute(self, *a, **k):
+            raise sqlite3.OperationalError("symulowana awaria dysku")
+
+        def commit(self):
+            pass
+    db._conn = _BoomConn()
+
+    received: list = []
+    bus.subscribe(EventType.MARKET_TICK, lambda e: received.append(e))   # inny subskrybent
+
+    # publish nie może wyrzucić wyjątku mimo padającego zapisu DB
+    asyncio.run(bus.publish(Event(EventType.MARKET_TICK, 1.0, "s", payload={"x": 1})))
+
+    assert received                       # reszta szyny działa mimo awarii DB (izolacja)

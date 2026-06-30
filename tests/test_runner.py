@@ -58,6 +58,40 @@ def test_emergency_stop_flattens_and_kills():
     asyncio.run(run())
 
 
+def test_stale_feed_midsequence_triggers_emergency_flatten():
+    """Chaos #7: luka w feedzie PO otwarciu pozycji → STALE_FEED → EMERGENCY_STOP →
+    awaryjne domknięcie. Inwariant: po chaosie flat + kill."""
+    from dataclasses import replace
+
+    from backend.adapters.market.base import MarketDataAdapter, MarketSource
+
+    class _ListSource(MarketSource):
+        def __init__(self, ticks):
+            self._ticks = ticks
+
+        async def ticks(self):
+            for t in self._ticks:
+                yield t
+
+    bus = EventBus()
+    clock = SimClock()
+    pipe = Pipeline(bus, risk_config=_generous(), broker=PaperBrokerAdapter(seed=1), clock=clock)
+    Monitor(bus, clock=clock).attach(bus)
+
+    open_tick = tick_with(60.0)                          # ts=1000 → otwiera (dyslokacja)
+    gap_tick = replace(tick_with(0.0), ts=1100.0)        # luka 100s > stale_after_s
+    adapter = MarketDataAdapter(_ListSource([open_tick, gap_tick]), bus, clock, stale_after_s=5.0)
+
+    stops: list = []
+    bus.subscribe(EventType.EMERGENCY_STOP, lambda e: stops.append(e.payload))
+
+    asyncio.run(adapter.run())
+
+    assert stops, "STALE_FEED powinien eskalować do EMERGENCY_STOP"
+    assert pipe.risk.is_killed
+    assert not pipe.book.is_open(Asset.BTC)              # awaryjnie domknięte → flat
+
+
 def test_app_synthetic_runs_and_reports():
     app = OneWishApp(mode="synthetic", steps=200, seed=3, gui=False,
                      risk_config=_generous(), notional_usd=200.0)
