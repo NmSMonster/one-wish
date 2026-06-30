@@ -170,8 +170,17 @@ Z przeglądów Codexa „survive live" — zrobione: P0 OrderManager, #4 kwantyz
 8. **Lost-ack handling** — reconcile-before-retry w OrderManagerze (zapytaj o stan
    zlecenia po coid przed ponowieniem), żeby uniknąć podwójnego filla. Wymagane przed
    realnym pilotem live.
-9. **(potem, po pozytywnym pilocie na testnecie)** kontrolowany pilot live na
-   minimalnych stawkach (`allow_mainnet=True`, świadoma decyzja właściciela).
+9. **⭐ DECYZJA WŁAŚCICIELA: forward paper-trade na ŻYWYM rynku z fikcyjnym budżetem
+   ~50 zł.** Gdy reszta gotowa: puścić bota na ŻYWYCH danych Binance (read-only),
+   ale z egzekucją PAPIEROWĄ i fikcyjnym kapitałem startowym ~50 zł (≈ $12–13) —
+   zobaczyć, jak radzi sobie w realnych warunkach BEZ ryzyka pieniędzy. To NIE jest
+   mainnet/realny handel, to paper na żywym rynku (`mode="live"` używa
+   BinancePublicSource + PaperBroker; trzeba dodać limit kapitału = budżet i tracking
+   „ile z 50 zł zostało"). UWAGA na sizing: perp minNotional BTC $50 / ETH $20 —
+   przy budżecie 50 zł trzeba tańszego aktywa lub świadomości, że zmieści się tylko
+   1 mała para. Cel: uczciwy test zachowania przed jakimkolwiek mainnetem.
+10. **(potem, po pozytywnym pilocie na testnecie + paper-live)** kontrolowany pilot
+    live na minimalnych stawkach (`allow_mainnet=True`, świadoma decyzja właściciela).
 
 Overlay kierunkowy (BTC→alty lead-lag) — opcja „wyższy zwrot/ryzyko", NIE potrzebny
 jako fallback (carry przeszedł).
