@@ -30,7 +30,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from ...core.types import BINANCE_SYMBOL, Fill, Leg, OrderRequest, OrderStatus
+from ...core.types import BINANCE_SYMBOL, Asset, Fill, Leg, OrderRequest, OrderStatus, Side
 from .base import ExchangeAdapter, OrderResult
 
 log = logging.getLogger("onewish.binance_live")
@@ -154,9 +154,13 @@ class BinanceLiveAdapter(ExchangeAdapter):
             avg = notional / qty if qty > 0 else float(req.price)
             fee = sum(float(f.get("commission", 0.0) or 0.0) for f in fills)
             executed = executed or qty
-        else:      # futures: zagregowane avgPrice/executedQty
-            avg = float(resp.get("avgPrice", 0.0) or 0.0) or float(req.price)
-            fee = 0.0   # prowizja futures nie jest w odpowiedzi zlecenia → reconcile/ledger
+        else:      # futures: avgPrice; spot GET order: cummulativeQuoteQty/executedQty
+            cqq = float(resp.get("cummulativeQuoteQty", 0.0) or 0.0)
+            avg = float(resp.get("avgPrice", 0.0) or 0.0)
+            if not avg and executed > 0 and cqq > 0:
+                avg = cqq / executed
+            avg = avg or float(req.price)
+            fee = 0.0   # prowizja nie zawsze w odpowiedzi → reconcile/ledger
 
         raw = str(resp.get("status", "")).upper()
         try:
@@ -201,8 +205,9 @@ class BinanceLiveAdapter(ExchangeAdapter):
         try:
             return await self._send_order(req)
         except (urllib.error.URLError, TimeoutError, OSError, ValueError, KeyError) as exc:
+            # ack zgubiony: zlecenie mogło dojść do giełdy → uncertain (reconcile przed retry)
             log.warning("Błąd transportu zlecenia %s: %s", req.client_order_id, exc)
-            return OrderResult(OrderStatus.REJECTED, [], f"błąd transportu: {exc}")
+            return OrderResult(OrderStatus.REJECTED, [], f"błąd transportu: {exc}", uncertain=True)
 
     async def reconcile(self) -> list[dict]:
         """Otwarte zlecenia na giełdzie (spot + futures) do uzgodnienia po restarcie."""
@@ -233,6 +238,51 @@ class BinanceLiveAdapter(ExchangeAdapter):
             log.warning("Pobranie stanu konta nieudane: %s", exc)
             return {}
         return {"spot": spot, "futures": fut}
+
+    async def query_order(self, asset: Asset, leg: Leg, coid: str) -> OrderResult | None:
+        """Stan zlecenia po client_order_id (reconcile-before-retry przy zgubionym ack).
+        None = zlecenia nie ma na giełdzie (nie złożone). Wyjątek = stanu nie ustalono."""
+        if not (self._armed and self.transport_implemented):
+            return None
+        base, path = self._base_and_path(leg)
+        params = {"symbol": BINANCE_SYMBOL[asset], "origClientOrderId": coid}
+        loop = asyncio.get_event_loop()
+        try:
+            resp = await loop.run_in_executor(None, self._signed_request, "GET", base, path, params)
+        except urllib.error.HTTPError as exc:
+            if _is_order_absent(exc):
+                return None              # -2013 Order does not exist → nie złożone
+            raise                        # inny błąd HTTP → nieznany stan (OM przerwie)
+        return _parse_query_order(resp, asset, leg, coid)
+
+
+def _is_order_absent(exc: urllib.error.HTTPError) -> bool:
+    """Czy odpowiedź błędu to Binance -2013 'Order does not exist.'"""
+    try:
+        data = json.loads(exc.read().decode("utf-8"))
+        return int(data.get("code", 0)) == -2013
+    except (ValueError, OSError, AttributeError):
+        return False
+
+
+def _parse_query_order(resp: dict, asset: Asset, leg: Leg, coid: str) -> OrderResult:
+    """Zamienia odpowiedź GET order na OrderResult (z fillem, jeśli coś wykonane)."""
+    executed = float(resp.get("executedQty", 0.0) or 0.0)
+    raw = str(resp.get("status", "")).upper()
+    try:
+        status = OrderStatus(raw)
+    except ValueError:
+        status = OrderStatus.FILLED if executed > 0 else OrderStatus.REJECTED
+    if executed <= 0:
+        return OrderResult(status, [], "zlecenie istnieje, brak wypełnienia")
+    side = Side(resp.get("side", "BUY"))
+    cqq = float(resp.get("cummulativeQuoteQty", 0.0) or 0.0)
+    avg = float(resp.get("avgPrice", 0.0) or 0.0)
+    if not avg and cqq > 0:
+        avg = cqq / executed
+    avg = avg or float(resp.get("price", 0.0) or 0.0)
+    ts = float(resp.get("updateTime", 0.0) or 0.0) / 1000.0
+    return OrderResult(status, [Fill(coid, asset, leg, side, avg, executed, 0.0, ts)])
 
 
 def _fmt_qty(qty: float) -> str:

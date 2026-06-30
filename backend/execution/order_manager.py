@@ -111,6 +111,14 @@ class OrderManager:
             req = OrderRequest(coid, asset, leg, side, OrderType.MARKET, price, remaining, ts, action)
             await self._emit(EventType.ORDER_REQUEST, req, ts)
             result = await self.broker.submit(req)
+
+            if result.uncertain:
+                # Zgubiony ack: zlecenie MOGŁO dojść do giełdy. Ponowienie z nowym coid
+                # groziłoby PODWÓJNYM fillem → najpierw uzgodnij stan TEGO coid.
+                if not await self._reconcile_after_uncertain(mo, asset, leg, coid, ts):
+                    break              # stanu nie ustalono → przerwij (zero ryzyka dubla)
+                continue               # zastosowano ewentualne fille; pętla dośle resztę
+
             if result.status == OrderStatus.REJECTED:
                 await self._emit(EventType.ORDER_REJECTED, {"coid": coid, "reason": result.reason},
                                  ts, Severity.WARNING)
@@ -130,6 +138,34 @@ class OrderManager:
         else:
             mo.state = OrderStatus.REJECTED
         return mo
+
+    async def _reconcile_after_uncertain(self, mo: ManagedOrder, asset: Asset, leg: Leg,
+                                         coid: str, ts: float) -> bool:
+        """Po zgubionym acku pyta giełdę o stan `coid`. Zwraca:
+        - True  → stan ustalony: zastosowano ewentualne fille; dosłanie reszty bezpieczne,
+        - False → stanu NIE da się ustalić: przerwij, NIE ponawiaj (ryzyko podwójnego filla).
+
+        `query_order` zwraca None (zlecenie niezłożone → bezpieczne ponowienie) albo
+        OrderResult (zlecenie istnieje → liczymy jego fille). Każdy błąd zapytania
+        traktujemy jako stan nieustalony (fail-safe)."""
+        try:
+            q = await self.broker.query_order(asset, leg, coid)
+        except Exception as exc:  # noqa: BLE001 — nieustalony stan MUSI zatrzymać retry
+            await self._emit(EventType.ORDER_REJECTED,
+                             {"coid": coid, "reason": f"lost-ack: nieustalony stan ({exc}) — przerwano"},
+                             ts, Severity.CRITICAL)
+            return False
+        if q is None:
+            await self._emit(EventType.ORDER_REJECTED,
+                             {"coid": coid, "reason": "lost-ack: zlecenie niezłożone — ponawiam"},
+                             ts, Severity.WARNING)
+            return True
+        for fill in q.fills:
+            self.book.apply_fill(fill, fill.ts)
+            mo.filled_qty += fill.qty
+            mo.avg_price = fill.price
+            await self._emit(EventType.FILL, fill, fill.ts)
+        return True
 
     def _balanced(self, asset: Asset, qty_ref: float) -> bool:
         pos = self.book.position(asset)

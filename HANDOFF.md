@@ -9,7 +9,7 @@
 
 One Wish to **realny bot tradingowy**: delta-neutral **basis/funding carry** na
 Binance (long spot + short perp, inkasowanie funding). Backend Python, event-driven,
-**210 testów pytest zielonych**. Edge (carry) **zwalidowany na ~roku realnej historii
+**218 testów pytest zielonych**. Edge (carry) **zwalidowany na ~roku realnej historii
 funding (~+18%/rok delta-neutral po prowizjach)**. Bot poprawnie wchodzi w carry na
 realnych danych. Realny handel jest **domyślnie zablokowany** — jesteśmy w fazie
 paper/walidacji, przed transportem na testnecie i pilotem.
@@ -29,7 +29,7 @@ Folder roboczy: katalog repo (na GitHubie). Testy: `python -m pytest -q`.
   prowizje — naprawione).
 - **Tryb „dislocation"** (opcjonalny, do badań): wejście na perp-rich spike.
 
-## 2. Status — co działa (210 testów zielonych)
+## 2. Status — co działa (218 testów zielonych)
 
 Pełny pipeline event-driven (`backend/`):
 
@@ -104,7 +104,7 @@ backend/
                universe (ranking aktywów), recorder (zapis ticków)
 scripts/       study_funding, run_backtest, run_edge_validation, run_paper_live,
                record_market, record_liquidations, scan_universe, run_testnet_smoke
-tests/         pełna suita pytest (210)
+tests/         pełna suita pytest (218)
 Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md,
                CARRY_VERDICT.md, UNIVERSE_SCAN.md, DATA_CONTRACT.md, RUNBOOK.md, ten HANDOFF.md
 ```
@@ -112,7 +112,7 @@ Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md
 ## 6. Jak uruchomić
 
 ```
-python -m pytest -q                              # 210 testów
+python -m pytest -q                              # 218 testów
 python scripts/study_funding.py                  # werdykt carry na historii funding (natychmiast)
 python scripts/scan_universe.py --top 25         # ranking aktywów po carry
 python scripts/run_backtest.py                   # backtest carry vs scalp (synthetic)
@@ -138,8 +138,7 @@ Z przeglądów Codexa „survive live" — zrobione: P0 OrderManager, #4 kwantyz
 - ✅ **#7 chaos-testy** — martwa noga (perp nie domyka), mieszany chaos
   spot-partial+perp-dead, restart między nogami + recovery do flat, flatten-noop,
   stale feed mid-sequence → EMERGENCY_STOP → flatten (E2E), DB write fail izolowany
-  (awaria zapisu nie zabija szyny). Lost-ack świadomie odłożony do live transport
-  (wymaga reconcile-before-retry, inaczej ryzyko podwójnego filla).
+  (awaria zapisu nie zabija szyny).
 - ✅ **#8 alerty poza GUI + runbook** — `AlertManager` (backend/monitoring/alerts.py):
   pluggable sinki (Log/Buffer/Webhook), próg severity, throttling per (rodzaj,aktywo),
   CRITICAL nigdy nietłumiony; konfiguracja z env (Discord/Telegram), sekrety tylko
@@ -165,14 +164,18 @@ Z przeglądów Codexa „survive live" — zrobione: P0 OrderManager, #4 kwantyz
   spójności pilnuje, że każde aktywo ma symbol/bracket/cenę. **TODO (Codex):** lista
   aktywów + kolory w GUI. UWAGA sizing: perp minNotional BTC $50 / ETH $20 — przy
   małym budżecie celuj w tańsze alty (DOGE/XRP).
+- ✅ **Lost-ack handling (reconcile-before-retry)** — `OrderResult.uncertain` (ack
+  zgubiony ≠ czysta odmowa), `ExchangeAdapter.query_order(coid)` (None=niezłożone /
+  OrderResult=istnieje / wyjątek=nieustalony), live adapter: GET order po
+  origClientOrderId (wykrywa -2013), transport-error → uncertain. OrderManager przy
+  uncertain pyta giełdę o stan TEGO coid przed ponowieniem: stosuje istniejące fille
+  (zero dubla), niezłożone → bezpieczne ponowienie, nieustalony stan → przerywa i
+  kompensuje do flat. Pełne pokrycie testami (3 scenariusze OM + query_order).
 
 **Zostało (buildable-now):**
 
 5. **#3 funding reconciliation** — ledger realnego funding z konta vs model (z kluczami).
    Teraz możliwe na bazie `account_state()`/userTrades testnet.
-8. **Lost-ack handling** — reconcile-before-retry w OrderManagerze (zapytaj o stan
-   zlecenia po coid przed ponowieniem), żeby uniknąć podwójnego filla. Wymagane przed
-   realnym pilotem live.
 9. **⭐ DECYZJA WŁAŚCICIELA: forward paper-trade na ŻYWYM rynku z fikcyjnym budżetem
    ~150 zł.** Mechanizm GOTOWY: `OneWishApp(mode="live", budget_pln=150)` — żywe dane
    Binance (read-only) + egzekucja PAPIEROWA + limit kapitału z budżetu

@@ -79,6 +79,66 @@ class SpotOkPerpDeadBroker(ExchangeAdapter):
         return OrderResult(OrderStatus.FILLED, [fill])
 
 
+class LostAckFilledBroker(ExchangeAdapter):
+    """Każdy submit gubi ack (uncertain), ALE zlecenie wchodzi i wypełnia się w pełni.
+    query_order to potwierdza. OM nie może złożyć drugiego zlecenia (podwójny fill)."""
+    name = "lost_ack_filled"
+
+    def __init__(self) -> None:
+        self.submits = 0
+        self._last: dict = {}
+
+    async def submit(self, req: OrderRequest) -> OrderResult:
+        self.submits += 1
+        self._last[req.leg] = req
+        return OrderResult(OrderStatus.REJECTED, [], "timeout", uncertain=True)
+
+    async def query_order(self, asset, leg, coid):
+        r = self._last[leg]
+        fill = Fill(coid, asset, leg, r.side, r.price, r.qty, 0.0, r.ts)
+        return OrderResult(OrderStatus.FILLED, [fill])
+
+
+class LostAckAbsentBroker(ExchangeAdapter):
+    """Pierwsza próba nogi: ack zgubiony, ale zlecenie NIE dotarło (query → None).
+    Kolejna próba: normalny pełny fill."""
+    name = "lost_ack_absent"
+
+    def __init__(self) -> None:
+        self._seen: dict = {}
+        self.submits = 0
+
+    async def submit(self, req: OrderRequest) -> OrderResult:
+        self.submits += 1
+        if not self._seen.get(req.leg):
+            self._seen[req.leg] = True
+            return OrderResult(OrderStatus.REJECTED, [], "timeout", uncertain=True)
+        fill = Fill(req.client_order_id, req.asset, req.leg, req.side, req.price, req.qty, 0.0, req.ts)
+        return OrderResult(OrderStatus.FILLED, [fill])
+
+    async def query_order(self, asset, leg, coid):
+        return None                       # zlecenie nie zostało złożone
+
+
+class LostAckQueryFailsBroker(ExchangeAdapter):
+    """Spot fillsuje normalnie; perp gubi ack, a query_order PADA (stan nieustalony).
+    OM nie może ponowić perpa (ryzyko dubla) → para kompensowana do flat."""
+    name = "lost_ack_query_fails"
+
+    def __init__(self) -> None:
+        self.perp_submits = 0
+
+    async def submit(self, req: OrderRequest) -> OrderResult:
+        if req.leg == Leg.PERP:
+            self.perp_submits += 1
+            return OrderResult(OrderStatus.REJECTED, [], "timeout", uncertain=True)
+        fill = Fill(req.client_order_id, req.asset, req.leg, req.side, req.price, req.qty, 0.0, req.ts)
+        return OrderResult(OrderStatus.FILLED, [fill])
+
+    async def query_order(self, asset, leg, coid):
+        raise OSError("query down")       # stanu nie da się ustalić
+
+
 def _assert_invariant(book: PositionBook, asset: Asset) -> None:
     pos = book.position(asset)
     if pos is None or not pos.is_open:
@@ -192,3 +252,39 @@ def test_flatten_on_flat_is_noop():
     asyncio.run(om._flatten(Asset.BTC))          # nic otwartego → brak wyjątku, brak wejść
     assert not om.book.is_open(Asset.BTC)
     assert om.reconcile()["open_positions"] == []
+
+
+# -- lost-ack: reconcile-before-retry (zero podwójnego filla) ---------------- #
+def test_lost_ack_filled_reconciles_without_double_submit():
+    broker = LostAckFilledBroker()
+    om = _om(broker, max_attempts=3)
+    pair = asyncio.run(om.open_pair(Asset.BTC, 0.01, 0.01, 100.0, 100.0))
+    assert pair.state == PairState.OPEN
+    _assert_invariant(om.book, Asset.BTC)
+    # KLUCZOWE: po jednym submitcie na nogę (ack zgubiony) reconcile potwierdził fill;
+    # OM NIE złożył drugiego zlecenia → 2 submity (spot+perp), nie 4.
+    assert broker.submits == 2
+    pos = om.book.position(Asset.BTC)
+    assert abs(pos.spot_qty - 0.01) < 1e-9       # dokładnie raz, bez dubla
+    assert abs(pos.perp_qty + 0.01) < 1e-9
+
+
+def test_lost_ack_absent_order_safely_retries():
+    broker = LostAckAbsentBroker()
+    om = _om(broker, max_attempts=3)
+    pair = asyncio.run(om.open_pair(Asset.BTC, 0.01, 0.01, 100.0, 100.0))
+    assert pair.state == PairState.OPEN          # niezłożone → ponowiono i wypełniono
+    _assert_invariant(om.book, Asset.BTC)
+    # każda noga: 1x uncertain (absent) + 1x fill = 2 submity → razem 4
+    assert broker.submits == 4
+
+
+def test_lost_ack_query_failure_aborts_to_flat_no_retry():
+    broker = LostAckQueryFailsBroker()
+    om = _om(broker, max_attempts=3)
+    pair = asyncio.run(om.open_pair(Asset.BTC, 0.01, 0.01, 100.0, 100.0))
+    assert pair.state == PairState.ABORTED
+    assert not om.book.is_open(Asset.BTC)        # skompensowane do flat
+    _assert_invariant(om.book, Asset.BTC)
+    # perp próbowany dokładnie RAZ (po nieustalonym stanie NIE ponawiamy)
+    assert broker.perp_submits == 1

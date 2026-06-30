@@ -185,3 +185,65 @@ def test_account_state_returns_spot_and_futures():
         {"balances": []} if "account" in path else [{"asset": "USDT", "balance": "1000"}])
     state = asyncio.run(a.account_state())
     assert "spot" in state and "futures" in state
+
+
+# -- query_order + uncertain (lost-ack) ------------------------------------- #
+def test_submit_transport_error_sets_uncertain():
+    a = _armed(testnet=True)
+
+    def boom(*args, **kw):
+        raise OSError("network down")
+    a._signed_request = boom
+
+    res = asyncio.run(a.submit(_req()))
+    assert res.status == OrderStatus.REJECTED
+    assert res.uncertain is True               # ack zgubiony → reconcile przed retry
+
+
+def test_query_order_returns_fill_when_filled():
+    a = _armed(testnet=True)
+    a._signed_request = lambda *args, **kw: {
+        "status": "FILLED", "side": "BUY", "executedQty": "0.5",
+        "cummulativeQuoteQty": "55.0", "updateTime": 1000}
+    res = asyncio.run(a.query_order(Asset.BTC, Leg.SPOT, "c1"))
+    assert res is not None and res.status == OrderStatus.FILLED
+    assert len(res.fills) == 1
+    assert abs(res.fills[0].qty - 0.5) < 1e-9
+    assert abs(res.fills[0].price - 110.0) < 1e-9   # 55.0 / 0.5
+
+
+def test_query_order_none_when_order_absent():
+    import io
+    import urllib.error
+
+    a = _armed(testnet=True)
+
+    def absent(*args, **kw):
+        raise urllib.error.HTTPError(
+            "http://x", 400, "Bad Request", {},
+            io.BytesIO(b'{"code":-2013,"msg":"Order does not exist."}'))
+    a._signed_request = absent
+
+    assert asyncio.run(a.query_order(Asset.BTC, Leg.PERP, "ghost")) is None
+
+
+def test_query_order_reraises_on_other_http_error():
+    import io
+    import urllib.error
+
+    import pytest as _pytest
+
+    a = _armed(testnet=True)
+
+    def other(*args, **kw):
+        raise urllib.error.HTTPError(
+            "http://x", 500, "Server Error", {}, io.BytesIO(b'{"code":-1000,"msg":"boom"}'))
+    a._signed_request = other
+
+    with _pytest.raises(urllib.error.HTTPError):
+        asyncio.run(a.query_order(Asset.BTC, Leg.SPOT, "c1"))
+
+
+def test_query_order_blocked_when_transport_off():
+    a = _armed(testnet=True, transport=False)
+    assert asyncio.run(a.query_order(Asset.BTC, Leg.SPOT, "c1")) is None
