@@ -9,7 +9,7 @@
 
 One Wish to **realny bot tradingowy**: delta-neutral **basis/funding carry** na
 Binance (long spot + short perp, inkasowanie funding). Backend Python, event-driven,
-**184 testy pytest zielone**. Edge (carry) **zwalidowany na ~roku realnej historii
+**195 testów pytest zielonych**. Edge (carry) **zwalidowany na ~roku realnej historii
 funding (~+18%/rok delta-neutral po prowizjach)**. Bot poprawnie wchodzi w carry na
 realnych danych. Realny handel jest **domyślnie zablokowany** — jesteśmy w fazie
 paper/walidacji, przed transportem na testnecie i pilotem.
@@ -29,7 +29,7 @@ Folder roboczy: katalog repo (na GitHubie). Testy: `python -m pytest -q`.
   prowizje — naprawione).
 - **Tryb „dislocation"** (opcjonalny, do badań): wejście na perp-rich spike.
 
-## 2. Status — co działa (184 testy zielone)
+## 2. Status — co działa (195 testów zielonych)
 
 Pełny pipeline event-driven (`backend/`):
 
@@ -87,7 +87,7 @@ backend/
   adapters/
     market/    binance_public (REST read-only + forward funding + OI + depth),
                synthetic, replay, liquidations (WS), base (MarketDataAdapter)
-    exchange/  paper (PaperBroker), binance_live (ZABLOKOWANY, transport off)
+    exchange/  paper (PaperBroker), binance_live (transport testnet, domyślnie OFF)
   model/       fair_value, costs
   signal/      repricing (RepricingDetector: entry_mode carry/dislocation)
   strategy/    policy (StrategyPolicy: carry-hold + EMA funding exit)
@@ -103,8 +103,8 @@ backend/
   research/    edge_validation (M3.5), funding_study (werdykt carry),
                universe (ranking aktywów), recorder (zapis ticków)
 scripts/       study_funding, run_backtest, run_edge_validation, run_paper_live,
-               record_market, record_liquidations, scan_universe
-tests/         pełna suita pytest (184)
+               record_market, record_liquidations, scan_universe, run_testnet_smoke
+tests/         pełna suita pytest (195)
 Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md,
                CARRY_VERDICT.md, UNIVERSE_SCAN.md, DATA_CONTRACT.md, RUNBOOK.md, ten HANDOFF.md
 ```
@@ -112,7 +112,7 @@ Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md
 ## 6. Jak uruchomić
 
 ```
-python -m pytest -q                              # 184 testy
+python -m pytest -q                              # 195 testów
 python scripts/study_funding.py                  # werdykt carry na historii funding (natychmiast)
 python scripts/scan_universe.py --top 25         # ranking aktywów po carry
 python scripts/run_backtest.py                   # backtest carry vs scalp (synthetic)
@@ -150,17 +150,28 @@ Z przeglądów Codexa „survive live" — zrobione: P0 OrderManager, #4 kwantyz
   bps, realny spread (spot/perp) i opóźnienie danych — z fillów i ticków. Shadow
   (obserwacja, bez wpływu na decyzje). Wpięte do runnera (snapshot w logu na koniec).
   Pamięć referencji ograniczona (FIFO). Pozwala weryfikować założenia `CostModel`.
+- ✅ **Transport na TESTNECIE** — `BinanceLiveAdapter` ma realny podpisany transport
+  (HMAC-SHA256), zlecenia MARKET spot + USDT-M perp, parsowanie fillów (spot fills /
+  futures avgPrice), `reconcile()` (otwarte zlecenia spot+fut), `account_state()`.
+  Domyślnie nadal ZABLOKOWANY: wysyłka wymaga live_enabled + klucze z env + arm(token)
+  + `transport_implemented=True` + `testnet=True` (mainnet osobno za `allow_mainnet`).
+  Limit nominału przed transportem. Smoke-test: `scripts/run_testnet_smoke.py --yes`
+  (wymaga kluczy TESTNET z env). Jedyny styk I/O (`_signed_request`) izolowany i
+  przetestowany przez stub (zero sieci w testach). Lost-ack nadal TODO (reconcile-
+  before-retry) przed realnym pilotem.
 
 **Zostało (buildable-now):**
 
 5. **#3 funding reconciliation** — ledger realnego funding z konta vs model (z kluczami).
+   Teraz możliwe na bazie `account_state()`/userTrades testnet.
 7. **Wpięcie rozszerzonego uniwersum do live** — dodać DOGE/ZEC/VELVET/TAC/HYPE
    (z UNIVERSE_SCAN.md); rusza Asset enum (core/types) + listę aktywów w GUI (Codex).
    Sizing licz w wielokrotnościach kroku PERPA (perp minNotional BTC $50, ETH $20!).
-8. **Realny transport na TESTNECIE** — podpisane zlecenia spot+perp, stan konta,
-   reconcyliacja, na `testnet.binancefuture.com` (fałszywe pieniądze, zero ryzyka).
-   binance_live ma `transport_implemented=False`. To krok do live-capable.
-9. **(potem, po pozytywnym pilocie)** kontrolowany pilot live na minimalnych stawkach.
+8. **Lost-ack handling** — reconcile-before-retry w OrderManagerze (zapytaj o stan
+   zlecenia po coid przed ponowieniem), żeby uniknąć podwójnego filla. Wymagane przed
+   realnym pilotem live.
+9. **(potem, po pozytywnym pilocie na testnecie)** kontrolowany pilot live na
+   minimalnych stawkach (`allow_mainnet=True`, świadoma decyzja właściciela).
 
 Overlay kierunkowy (BTC→alty lead-lag) — opcja „wyższy zwrot/ryzyko", NIE potrzebny
 jako fallback (carry przeszedł).
@@ -177,10 +188,11 @@ jako fallback (carry przeszedł).
 
 ## 9. Bezpieczeństwo — czego NIE robić
 
-- **Nie włączaj realnego handlu.** `binance_live` jest zablokowany (live_enabled,
-  arm(token "I_UNDERSTAND_REAL_MONEY"), klucze z env, limity, transport_implemented=
-  False). Realny handel dopiero po: testnet + pozytywny werdykt + świadoma decyzja
-  właściciela.
+- **Nie włączaj realnego handlu na MAINNECIE.** `binance_live` ma już realny transport,
+  ale jest domyślnie zablokowany wieloma bramkami: live_enabled, arm(token
+  "I_UNDERSTAND_REAL_MONEY"), klucze z env, limit nominału, `transport_implemented=False`
+  domyślnie, oraz `testnet=True` (mainnet wymaga osobnego `allow_mainnet=True`). Kolejność:
+  najpierw testnet (smoke + pilot), potem dopiero świadoma decyzja o mainnecie.
 - **Sekrety** (klucze, portfel) tylko z env (`ONEWISH_BINANCE_KEY/SECRET`), nigdy w repo.
 - Recorder i wszystkie skrypty danych to **tylko odczyt** publicznych endpointów — bezpieczne.
 - Każda zmiana z testem. Utrzymuj `pytest -q` na zielono.
