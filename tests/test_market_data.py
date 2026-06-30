@@ -1,5 +1,7 @@
 """Testy wzbogacenia danych: forward funding, mark/premium, open interest."""
-from backend.adapters.market.binance_public import predict_funding
+from collections import defaultdict
+
+from backend.adapters.market.binance_public import BinancePublicSource, predict_funding
 from backend.core.types import Asset, MarketTick
 
 
@@ -44,3 +46,96 @@ def test_market_tick_new_fields_default_zero():
 def test_market_tick_premium_bps():
     t = _tick(mark_price=100.2)           # (100.2-100)/100 = 0.002 = 20 bps
     assert abs(t.premium_bps - 20.0) < 1e-6
+
+
+# -- Optymalizacja recordera: kadencja cen vs OI/głębokość ------------------ #
+SYMBOL = "BTCUSDT"
+
+
+def _fake_get(counter: dict, *, depth_value: float = 5.0, raise_heavy: bool = False):
+    """Stub _get: liczy zapytania per kategoria; ceny zawsze działają, ciężkie
+    (OI/głębokość) opcjonalnie rzucają, by sprawdzić zachowanie stale-on-error."""
+    def fake(url: str):
+        is_fapi = "fapi.binance.com" in url
+        if "ticker/bookTicker" in url and not is_fapi:
+            counter["spot_book"] += 1
+            return [{"symbol": SYMBOL, "bidPrice": "100", "askPrice": "100.2"}]
+        if "premiumIndex" in url:
+            counter["prem"] += 1
+            return [{"symbol": SYMBOL, "indexPrice": "100", "markPrice": "100.1",
+                     "lastFundingRate": "0.0001", "interestRate": "0.0001",
+                     "nextFundingTime": "2000", "time": "1000"}]
+        if "ticker/bookTicker" in url and is_fapi:
+            counter["fut_book"] += 1
+            return [{"symbol": SYMBOL, "bidPrice": "100.05", "askPrice": "100.15"}]
+        if "openInterest" in url:
+            counter["oi"] += 1
+            if raise_heavy:
+                raise OSError("net")
+            return {"openInterest": "10"}
+        if "depth" in url:
+            key = "perp_depth" if is_fapi else "spot_depth"
+            counter[key] += 1
+            if raise_heavy:
+                raise OSError("net")
+            return {"asks": [["100", str(depth_value)]], "bids": [["99", str(depth_value)]]}
+        raise AssertionError(f"nieoczekiwany URL: {url}")
+    return fake
+
+
+def _src(**kw) -> BinancePublicSource:
+    return BinancePublicSource(assets=(Asset.BTC,), fetch_depth=True,
+                               fetch_extras=True, **kw)
+
+
+def test_heavy_fetch_cached_between_cycles():
+    counter = defaultdict(int)
+    src = _src(slow_every=3)
+    src._get = _fake_get(counter)
+
+    src._fetch_once(refresh_heavy=True)    # cykl 0: ceny + ciężkie
+    src._fetch_once(refresh_heavy=False)   # cykl 1: tylko ceny (cache)
+    src._fetch_once(refresh_heavy=False)   # cykl 2: tylko ceny (cache)
+
+    assert counter["prem"] == 3            # ceny pobrane co cykl
+    assert counter["oi"] == 1              # OI tylko raz (cache)
+    assert counter["spot_depth"] == 1      # głębokość tylko raz (cache)
+    assert counter["perp_depth"] == 1
+
+
+def test_cached_depth_and_oi_used_between_refreshes():
+    counter = defaultdict(int)
+    src = _src(slow_every=5)
+    src._get = _fake_get(counter)
+
+    src._fetch_once(refresh_heavy=True)
+    t = src._fetch_once(refresh_heavy=False)[0]
+
+    assert t.spot_depth_usd == 100 * 5     # asks top: cena×ilość z cache
+    assert t.perp_depth_usd == 99 * 5      # bids top
+    assert abs(t.open_interest_usd - 10 * 100.1) < 1e-9   # coiny z cache × świeży mark
+
+
+def test_heavy_error_keeps_stale_cache():
+    counter = defaultdict(int)
+    src = _src()
+    src._get = _fake_get(counter, depth_value=5.0)
+    src._fetch_once(refresh_heavy=True)    # zapełnia cache dobrymi wartościami
+
+    src._get = _fake_get(counter, raise_heavy=True)
+    src._fetch_once(refresh_heavy=True)    # próba odświeżenia kończy się błędem
+    t = src._fetch_once(refresh_heavy=False)[0]
+
+    assert t.spot_depth_usd == 100 * 5     # zachowana ostatnia dobra wartość
+    assert abs(t.open_interest_usd - 10 * 100.1) < 1e-9
+
+
+def test_first_cycle_without_cache_uses_default_depth():
+    counter = defaultdict(int)
+    src = _src(depth_usd_default=777.0)
+    src._get = _fake_get(counter, raise_heavy=True)   # ciężkie padają od razu
+
+    t = src._fetch_once(refresh_heavy=True)[0]
+
+    assert t.spot_depth_usd == 777.0       # brak cache → placeholder
+    assert t.open_interest_usd == 0.0      # brak OI w cache → 0

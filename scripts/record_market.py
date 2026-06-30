@@ -51,6 +51,8 @@ def main() -> None:
     ap.add_argument("--out", default="data/binance_ticks.jsonl")
     ap.add_argument("--cycles", type=int, default=30, help="liczba cykli pobrań (0 = bez limitu)")
     ap.add_argument("--interval", type=float, default=2.0)
+    ap.add_argument("--slow-every", type=int, default=15,
+                    help="OI/głębokość odświeżaj co N cykli cen (1 = co cykl, wolno)")
     args = ap.parse_args()
 
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
@@ -63,7 +65,7 @@ def main() -> None:
         print(f"[{now}] zapisano {n} tickow...", flush=True)
 
     src = BinancePublicSource(poll_interval=args.interval, max_cycles=max_cycles,
-                              fetch_depth=True, fetch_extras=True)
+                              fetch_depth=True, fetch_extras=True, slow_every=args.slow_every)
     bus = EventBus()
     recorder = TickRecorder(args.out, heartbeat_every=40, on_heartbeat=heartbeat)
     recorder.attach(bus)
@@ -71,7 +73,7 @@ def main() -> None:
 
     _save_funding_history(args.out)
     print(f"Nagrywam realne dane Binance (forward funding + mark + OI) -> {args.out} "
-          f"(cykle={args.cycles}, interwal={args.interval}s)")
+          f"(cykle={args.cycles}, interwal={args.interval}s, OI/depth co {args.slow_every} cykli)")
     try:
         asyncio.run(adapter.run())
     except KeyboardInterrupt:
