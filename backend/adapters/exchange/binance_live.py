@@ -49,6 +49,7 @@ _SPOT_OPEN_ORDERS = "/api/v3/openOrders"
 _FUT_OPEN_ORDERS = "/fapi/v1/openOrders"
 _SPOT_ACCOUNT = "/api/v3/account"
 _FUT_BALANCE = "/fapi/v2/balance"
+_FUT_INCOME = "/fapi/v1/income"
 
 
 class LiveTradingBlocked(RuntimeError):
@@ -238,6 +239,27 @@ class BinanceLiveAdapter(ExchangeAdapter):
             log.warning("Pobranie stanu konta nieudane: %s", exc)
             return {}
         return {"spot": spot, "futures": fut}
+
+    async def funding_income(self, *, symbol: str | None = None, start_ms: int | None = None,
+                             end_ms: int | None = None, limit: int = 1000) -> list[dict]:
+        """Realnie zainkasowany funding (FUNDING_FEE) z konta futures — do uzgodnienia
+        z modelem (FundingReconciler). Pusta lista, gdy transport wyłączony/błąd."""
+        if not (self._armed and self.transport_implemented):
+            return []
+        params: dict = {"incomeType": "FUNDING_FEE", "limit": limit}
+        if symbol:
+            params["symbol"] = symbol
+        if start_ms is not None:
+            params["startTime"] = start_ms
+        if end_ms is not None:
+            params["endTime"] = end_ms
+        loop = asyncio.get_event_loop()
+        try:
+            return await loop.run_in_executor(None, self._signed_request,
+                                              "GET", self.fut_base, _FUT_INCOME, params)
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError, KeyError) as exc:
+            log.warning("Pobranie funding income nieudane: %s", exc)
+            return []
 
     async def query_order(self, asset: Asset, leg: Leg, coid: str) -> OrderResult | None:
         """Stan zlecenia po client_order_id (reconcile-before-retry przy zgubionym ack).

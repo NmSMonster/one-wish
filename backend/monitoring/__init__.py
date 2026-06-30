@@ -8,6 +8,7 @@ from .alerts import (
     WebhookSink,
     sinks_from_env,
 )
+from .reconcile import FundingReconciler
 from .telemetry import CostTelemetry, Running
 from .watchdog import Monitor
 
@@ -22,4 +23,5 @@ __all__ = [
     "sinks_from_env",
     "CostTelemetry",
     "Running",
+    "FundingReconciler",
 ]

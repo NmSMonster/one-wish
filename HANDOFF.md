@@ -9,7 +9,7 @@
 
 One Wish to **realny bot tradingowy**: delta-neutral **basis/funding carry** na
 Binance (long spot + short perp, inkasowanie funding). Backend Python, event-driven,
-**218 testów pytest zielonych**. Edge (carry) **zwalidowany na ~roku realnej historii
+**228 testów pytest zielonych**. Edge (carry) **zwalidowany na ~roku realnej historii
 funding (~+18%/rok delta-neutral po prowizjach)**. Bot poprawnie wchodzi w carry na
 realnych danych. Realny handel jest **domyślnie zablokowany** — jesteśmy w fazie
 paper/walidacji, przed transportem na testnecie i pilotem.
@@ -29,7 +29,7 @@ Folder roboczy: katalog repo (na GitHubie). Testy: `python -m pytest -q`.
   prowizje — naprawione).
 - **Tryb „dislocation"** (opcjonalny, do badań): wejście na perp-rich spike.
 
-## 2. Status — co działa (218 testów zielonych)
+## 2. Status — co działa (228 testów zielonych)
 
 Pełny pipeline event-driven (`backend/`):
 
@@ -104,7 +104,7 @@ backend/
                universe (ranking aktywów), recorder (zapis ticków)
 scripts/       study_funding, run_backtest, run_edge_validation, run_paper_live,
                record_market, record_liquidations, scan_universe, run_testnet_smoke
-tests/         pełna suita pytest (218)
+tests/         pełna suita pytest (228)
 Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md,
                CARRY_VERDICT.md, UNIVERSE_SCAN.md, DATA_CONTRACT.md, RUNBOOK.md, ten HANDOFF.md
 ```
@@ -112,7 +112,7 @@ Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md
 ## 6. Jak uruchomić
 
 ```
-python -m pytest -q                              # 218 testów
+python -m pytest -q                              # 228 testów
 python scripts/study_funding.py                  # werdykt carry na historii funding (natychmiast)
 python scripts/scan_universe.py --top 25         # ranking aktywów po carry
 python scripts/run_backtest.py                   # backtest carry vs scalp (synthetic)
@@ -171,11 +171,14 @@ Z przeglądów Codexa „survive live" — zrobione: P0 OrderManager, #4 kwantyz
   uncertain pyta giełdę o stan TEGO coid przed ponowieniem: stosuje istniejące fille
   (zero dubla), niezłożone → bezpieczne ponowienie, nieustalony stan → przerywa i
   kompensuje do flat. Pełne pokrycie testami (3 scenariusze OM + query_order).
+- ✅ **#3 funding reconciliation** — `FundingReconciler` (backend/monitoring/reconcile.py):
+  sumuje model funding z eventów FUNDING_ACCRUED per aktywo, agreguje realny income
+  (`aggregate_income` z rekordów FUNDING_FEE), porównuje (model/real/diff + totale) i
+  flaguje rozbieżność po DWÓCH progach (absolutnym i względnym). Adapter:
+  `funding_income()` (GET /fapi/v1/income FUNDING_FEE). Pełne pokrycie testami.
 
 **Zostało (buildable-now):**
 
-5. **#3 funding reconciliation** — ledger realnego funding z konta vs model (z kluczami).
-   Teraz możliwe na bazie `account_state()`/userTrades testnet.
 9. **⭐ DECYZJA WŁAŚCICIELA: forward paper-trade na ŻYWYM rynku z fikcyjnym budżetem
    ~150 zł.** Mechanizm GOTOWY: `OneWishApp(mode="live", budget_pln=150)` — żywe dane
    Binance (read-only) + egzekucja PAPIEROWA + limit kapitału z budżetu
