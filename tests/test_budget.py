@@ -106,6 +106,21 @@ def test_runner_with_budget_runs_green():
     assert report.counts.get("MARKET_TICK", 0) > 0   # przeszło bez wyjątku z budżetem
 
 
+def test_runner_budget_shrinks_notional_to_fit_cap():
+    # bez tego budżet odrzucałby każde wejście (nominał > cap) i bot nic by nie zrobił
+    app = OneWishApp(mode="synthetic", steps=10, gui=False, notional_usd=200.0, budget_pln=150.0)
+    assert app.notional_usd <= app.risk_config.max_trade_notional_usd + 1e-9
+    assert app.notional_usd < 200.0                  # realnie zmniejszony
+
+
+def test_runner_budget_allows_entry_and_uses_budget():
+    app = OneWishApp(mode="synthetic", steps=200, seed=3, gui=False, budget_pln=150.0)
+    asyncio.run(app.run())
+    fills = app.report.counts.get("FILL", 0) + app.report.counts.get("PARTIAL_FILL", 0)
+    assert fills > 0                                  # wejście faktycznie przeszło ryzyko
+    assert app.budget_report["committed_usd"] > 0     # budżet realnie wykorzystany
+
+
 # -- dwa portfele (spot vs futures) ----------------------------------------- #
 def test_wallet_split_sums_to_budget():
     s = wallet_split(40.0, perp_leverage=3.0)

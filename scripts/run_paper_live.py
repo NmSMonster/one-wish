@@ -6,6 +6,7 @@ egzekucja nadal PAPER). Realny handel jest osobny i domyślnie zablokowany.
 Użycie:
     python scripts/run_paper_live.py --mode synthetic --watch
     python scripts/run_paper_live.py --mode live --cycles 60
+    python scripts/run_paper_live.py --mode live --budget-pln 150   # forward paper-trade
 """
 from __future__ import annotations
 
@@ -35,6 +36,9 @@ def main() -> None:
     ap.add_argument("--no-gui", action="store_true")
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--watch", action="store_true", help="paceuj synthetic w czasie ~rzeczywistym (do GUI)")
+    ap.add_argument("--budget-pln", type=float, default=None,
+                    help="forward paper-trade: fikcyjny budżet w zł (limit ekspozycji + tracking). "
+                         "Egzekucja NADAL papierowa — zero realnych pieniędzy.")
     args = ap.parse_args()
 
     risk = RiskConfig.from_yaml(_RISK_YAML) if os.path.exists(_RISK_YAML) else RiskConfig()
@@ -47,12 +51,20 @@ def main() -> None:
         gui_port=args.port,
         live_cycles=args.cycles,
         risk_config=risk,
+        budget_pln=args.budget_pln,
     )
+    if args.budget_pln is not None:
+        print(f"Forward paper-trade: budżet {args.budget_pln:.0f} zł ≈ {app.budget_usd:.2f}$ "
+              f"(cap ekspozycji {app.risk_config.max_total_exposure_usd:.2f}$). Egzekucja PAPIEROWA.")
     if not args.no_gui:
         print(f"GUI: otworz index.html (config adapter=\"ws\") -> ws://127.0.0.1:{args.port}/gui")
     report = asyncio.run(app.run())
     print()
     print(report.summary())
+    if app.budget_report is not None:
+        b = app.budget_report
+        print(f"\nBudżet: użyte {b['committed_usd']:.2f}$ / {b['budget_usd']:.2f}$ "
+              f"({b['utilization_pct']:.0f}%), wolne {b['free_usd']:.2f}$")
 
 
 if __name__ == "__main__":

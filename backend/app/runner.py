@@ -65,14 +65,19 @@ class OneWishApp:
         # Fikcyjny budżet (forward paper-trade): ogranicza ekspozycję do budżetu i
         # śledzi jego wykorzystanie. Tylko paper — nie dotyka realnych pieniędzy.
         self.budget_tracker: BudgetTracker | None = None
+        self.budget_report: dict | None = None    # snapshot wykorzystania budżetu po sesji
         if budget_pln is not None:
             self.budget_usd = pln_to_usd(budget_pln)
             self.risk_config = budget_risk_config(
                 self.budget_usd, perp_leverage=self.risk_config.perp_leverage,
                 base=self.risk_config)
+            # Sizing MUSI zmieścić się w budżecie — inaczej ryzyko odrzuci każde wejście
+            # (nominał > cap) i bot nic nie zrobi. Tnij rozmiar pozycji do capu ekspozycji.
+            self.notional_usd = min(self.notional_usd, self.risk_config.max_trade_notional_usd)
             self.budget_tracker = BudgetTracker(self.budget_usd, self.risk_config.perp_leverage)
-            log.info("Budżet fikcyjny: %.0f zł ≈ %.2f$ (cap ekspozycji %.2f$)",
-                     budget_pln, self.budget_usd, self.risk_config.max_total_exposure_usd)
+            log.info("Budżet fikcyjny: %.0f zł ≈ %.2f$ (cap ekspozycji %.2f$, nominał/para %.2f$)",
+                     budget_pln, self.budget_usd, self.risk_config.max_total_exposure_usd,
+                     self.notional_usd)
         self.report: DailyReport | None = None
 
     def _build_source(self):
@@ -129,6 +134,7 @@ class OneWishApp:
                          snap["spread_bps"]["spot"]["mean"], snap["data_lag_ms"]["mean"])
             if self.budget_tracker is not None:
                 snap = self.budget_tracker.snapshot(pipe.book)
+                self.budget_report = snap
                 log.info("Budżet po sesji: użyte %.2f$ / %.2f$ (%.0f%%), wolne %.2f$",
                          snap["committed_usd"], snap["budget_usd"],
                          snap["utilization_pct"], snap["free_usd"])

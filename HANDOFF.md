@@ -9,7 +9,7 @@
 
 One Wish to **realny bot tradingowy**: delta-neutral **basis/funding carry** na
 Binance (long spot + short perp, inkasowanie funding). Backend Python, event-driven,
-**233 testy pytest zielone**. Edge (carry) **zwalidowany na ~roku realnej historii
+**235 testów pytest zielonych**. Edge (carry) **zwalidowany na ~roku realnej historii
 funding (~+18%/rok delta-neutral po prowizjach)**. Bot poprawnie wchodzi w carry na
 realnych danych. Realny handel jest **domyślnie zablokowany** — jesteśmy w fazie
 paper/walidacji, przed transportem na testnecie i pilotem.
@@ -29,7 +29,7 @@ Folder roboczy: katalog repo (na GitHubie). Testy: `python -m pytest -q`.
   prowizje — naprawione).
 - **Tryb „dislocation"** (opcjonalny, do badań): wejście na perp-rich spike.
 
-## 2. Status — co działa (233 testy zielone)
+## 2. Status — co działa (235 testów zielonych)
 
 Pełny pipeline event-driven (`backend/`):
 
@@ -104,7 +104,7 @@ backend/
                universe (ranking aktywów), recorder (zapis ticków)
 scripts/       study_funding, run_backtest, run_edge_validation, run_paper_live,
                record_market, record_liquidations, scan_universe, run_testnet_smoke
-tests/         pełna suita pytest (233)
+tests/         pełna suita pytest (235)
 Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md,
                CARRY_VERDICT.md, UNIVERSE_SCAN.md, DATA_CONTRACT.md, RUNBOOK.md, ten HANDOFF.md
 ```
@@ -112,7 +112,7 @@ Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md
 ## 6. Jak uruchomić
 
 ```
-python -m pytest -q                              # 233 testy
+python -m pytest -q                              # 235 testów
 python scripts/study_funding.py                  # werdykt carry na historii funding (natychmiast)
 python scripts/scan_universe.py --top 25         # ranking aktywów po carry
 python scripts/run_backtest.py                   # backtest carry vs scalp (synthetic)
@@ -182,15 +182,17 @@ Z przeglądów Codexa „survive live" — zrobione: P0 OrderManager, #4 kwantyz
 **Zostało (buildable-now):**
 
 9. **⭐ DECYZJA WŁAŚCICIELA: forward paper-trade na ŻYWYM rynku z fikcyjnym budżetem
-   ~150 zł.** Mechanizm GOTOWY: `OneWishApp(mode="live", budget_pln=150)` — żywe dane
-   Binance (read-only) + egzekucja PAPIEROWA + limit kapitału z budżetu
-   (`budget_risk_config`) + tracking „ile z 150 zł zostało" (`BudgetTracker`, snapshot
-   w logu). To NIE jest mainnet/realny handel. Budżet 150 zł ≈ $37 (USD_PER_PLN=0.25,
-   kurs przybliżony — zaktualizuj w budget.py jeśli trzeba). **Do uruchomienia:** odpalić
-   sesję live z budżetem i obserwować (najlepiej dłużej, przez ≥1 rozliczenie funding).
-   UWAGA sizing: perp minNotional BTC $50 / ETH $20 — przy $37 celuj w tańsze alty
-   (DOGE/XRP); BTC poza zasięgiem. Cel: uczciwy test zachowania przed jakimkolwiek
-   mainnetem.
+   ~150 zł.** Mechanizm GOTOWY i jednokomendowy:
+   `python scripts/run_paper_live.py --mode live --budget-pln 150 --no-gui`.
+   Żywe dane Binance (read-only) + egzekucja PAPIEROWA + limit kapitału z budżetu +
+   **automatyczne zmniejszenie rozmiaru pozycji do capu** (bez tego ryzyko odrzucało
+   KAŻDE wejście, bo nominał > cap — naprawione i przetestowane) + tracking „ile z 150
+   zł zostało" (snapshot w raporcie). Budżet 150 zł ≈ $37 (USD_PER_PLN=0.25). To NIE
+   jest mainnet/realny handel. **WYMAGA dostępu sieci do Binance:** sandbox tej sesji
+   blokuje `api.binance.com` (403 z proxy) — odpalaj na środowisku z polityką sieci
+   dopuszczającą Binance (Twój PC albo remote z odpowiednią polityką). UWAGA sizing:
+   perp minNotional BTC $50 / ETH $20 — przy $37 celuj w tańsze alty (DOGE/XRP); BTC
+   poza zasięgiem. Cel: uczciwy test zachowania przed jakimkolwiek mainnetem.
 10. **(potem, po pozytywnym pilocie na testnecie + paper-live)** kontrolowany pilot
     live na minimalnych stawkach (`allow_mainnet=True`, świadoma decyzja właściciela).
 
