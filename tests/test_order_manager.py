@@ -44,6 +44,41 @@ class PartialThenFullBroker(ExchangeAdapter):
         return OrderResult(OrderStatus.FILLED, [fill])
 
 
+class StuckPerpBroker(ExchangeAdapter):
+    """Spot wypełnia w pełni; perp przy WEJŚCIU domyka tylko 50% reszty (nigdy nie
+    domknie pary) — najgroźniejszy orphan: spot OK, perp wisi. Unwind (CLOSE) działa
+    normalnie (utknięcie było na wejściu; wyjście z resztki musi być możliwe)."""
+    name = "stuck_perp"
+
+    async def submit(self, req: OrderRequest) -> OrderResult:
+        if req.leg == Leg.PERP and req.intent_action == "OPEN":
+            half = req.qty * 0.5
+            fill = Fill(req.client_order_id, req.asset, req.leg, req.side, req.price, half, 0.0, req.ts)
+            return OrderResult(OrderStatus.PARTIALLY_FILLED, [fill])
+        fill = Fill(req.client_order_id, req.asset, req.leg, req.side, req.price, req.qty, 0.0, req.ts)
+        return OrderResult(OrderStatus.FILLED, [fill])
+
+
+class SpotOkPerpDeadBroker(ExchangeAdapter):
+    """Spot: partial potem pełne. Perp: zawsze odrzucone (martwa noga) — mieszany
+    chaos (niepełne spot + martwy perp) musi i tak skończyć się flat."""
+    name = "spot_ok_perp_dead"
+
+    def __init__(self) -> None:
+        self._spot_seen = False
+
+    async def submit(self, req: OrderRequest) -> OrderResult:
+        if req.leg == Leg.PERP:
+            return OrderResult(OrderStatus.REJECTED, [], "perp dead")
+        if not self._spot_seen:
+            self._spot_seen = True
+            half = req.qty * 0.5
+            fill = Fill(req.client_order_id, req.asset, req.leg, req.side, req.price, half, 0.0, req.ts)
+            return OrderResult(OrderStatus.PARTIALLY_FILLED, [fill])
+        fill = Fill(req.client_order_id, req.asset, req.leg, req.side, req.price, req.qty, 0.0, req.ts)
+        return OrderResult(OrderStatus.FILLED, [fill])
+
+
 def _assert_invariant(book: PositionBook, asset: Asset) -> None:
     pos = book.position(asset)
     if pos is None or not pos.is_open:
@@ -116,3 +151,44 @@ def test_reconcile_reports_clean_state():
     assert "BTC" in rec["open_positions"]
     assert rec["imbalanced"] == []
     assert rec["pending_orders"] == []
+
+
+# -- chaos #7: martwe nogi, restart między nogami, recovery ----------------- #
+def test_perp_never_completes_aborts_to_flat():
+    # spot OK, perp wisi w partialu po wyczerpaniu prób → kompensacja do flat
+    om = _om(StuckPerpBroker(), max_attempts=3)
+    pair = asyncio.run(om.open_pair(Asset.BTC, 0.01, 0.01, 100.0, 100.0))
+    assert pair.state == PairState.ABORTED
+    assert not om.book.is_open(Asset.BTC)
+    _assert_invariant(om.book, Asset.BTC)
+
+
+def test_mixed_spot_partial_perp_dead_aborts_to_flat():
+    # spot domyka się po partialu, perp całkiem martwy → i tak kończymy flat
+    om = _om(SpotOkPerpDeadBroker(), max_attempts=3)
+    pair = asyncio.run(om.open_pair(Asset.BTC, 0.01, 0.01, 100.0, 100.0))
+    assert pair.state == PairState.ABORTED
+    assert not om.book.is_open(Asset.BTC)
+    _assert_invariant(om.book, Asset.BTC)
+
+
+def test_restart_between_legs_detected_and_recovered():
+    # symulacja crashu PO nodze spot, PRZED perp: zostaje orphan spot
+    om = _om(PaperBrokerAdapter(slippage_bps=0.0))
+    asyncio.run(om._submit(Asset.BTC, Leg.SPOT, Side.BUY, 0.01, 100.0, "OPEN"))
+    assert om.book.is_open(Asset.BTC)
+
+    rec = om.reconcile()
+    assert "BTC" in rec["imbalanced"]            # reconcile wykrywa orphan po restarcie
+
+    asyncio.run(om._flatten(Asset.BTC))          # recovery: kompensacja do flat
+    assert not om.book.is_open(Asset.BTC)
+    _assert_invariant(om.book, Asset.BTC)
+    assert om.reconcile()["imbalanced"] == []    # czysto po recovery
+
+
+def test_flatten_on_flat_is_noop():
+    om = _om(PaperBrokerAdapter(slippage_bps=0.0))
+    asyncio.run(om._flatten(Asset.BTC))          # nic otwartego → brak wyjątku, brak wejść
+    assert not om.book.is_open(Asset.BTC)
+    assert om.reconcile()["open_positions"] == []
