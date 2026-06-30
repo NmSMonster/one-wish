@@ -9,7 +9,7 @@
 
 One Wish to **realny bot tradingowy**: delta-neutral **basis/funding carry** na
 Binance (long spot + short perp, inkasowanie funding). Backend Python, event-driven,
-**143 testy pytest zielone**. Edge (carry) **zwalidowany na ~roku realnej historii
+**158 testów pytest zielonych**. Edge (carry) **zwalidowany na ~roku realnej historii
 funding (~+18%/rok delta-neutral po prowizjach)**. Bot poprawnie wchodzi w carry na
 realnych danych. Realny handel jest **domyślnie zablokowany** — jesteśmy w fazie
 paper/walidacji, przed transportem na testnecie i pilotem.
@@ -29,7 +29,7 @@ Folder roboczy: katalog repo (na GitHubie). Testy: `python -m pytest -q`.
   prowizje — naprawione).
 - **Tryb „dislocation"** (opcjonalny, do badań): wejście na perp-rich spike.
 
-## 2. Status — co działa (143 testy zielone)
+## 2. Status — co działa (158 testów zielonych)
 
 Pełny pipeline event-driven (`backend/`):
 
@@ -104,7 +104,7 @@ backend/
                universe (ranking aktywów), recorder (zapis ticków)
 scripts/       study_funding, run_backtest, run_edge_validation, run_paper_live,
                record_market, record_liquidations, scan_universe
-tests/         pełna suita pytest (143)
+tests/         pełna suita pytest (158)
 Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md,
                CARRY_VERDICT.md, UNIVERSE_SCAN.md, DATA_CONTRACT.md, ten HANDOFF.md
 ```
@@ -112,7 +112,7 @@ Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md
 ## 6. Jak uruchomić
 
 ```
-python -m pytest -q                              # 143 testy
+python -m pytest -q                              # 158 testów
 python scripts/study_funding.py                  # werdykt carry na historii funding (natychmiast)
 python scripts/scan_universe.py --top 25         # ranking aktywów po carry
 python scripts/run_backtest.py                   # backtest carry vs scalp (synthetic)
@@ -125,14 +125,24 @@ Zależności: `pip install -r requirements.txt` (websockets, pyyaml, pytest).
 ## 7. Plan / backlog (priorytetowo)
 
 Z przeglądów Codexa „survive live" — zrobione: P0 OrderManager, #4 kwantyzacja,
-#6 circuit breakers, + krytyczny fix wejścia carry. **Zostało (buildable-now):**
+#6 circuit breakers, + krytyczny fix wejścia carry.
 
-1. **Optymalizacja recordera** — OI/głębokość pobierać rzadziej niż ceny (teraz ~15
-   zapytań/cykl → ~14s/cykl, za wolno). Łatwe, samodzielne.
-2. **#5 collateral engine** — model gotówki spot vs futures wallet, stress-test
-   marginu na +10/20/30% ruchu, per-symbol maintenance brackets.
-3. **#7 więcej chaos-testów** — restart między nogami, stale feed, DB write fail,
-   lost ack; invariant „po chaosie: delta-neutral albo flat + brak wejść".
+**Zrobione w sesji handoff (branch claude/handoff-documentation-tgert9):**
+- ✅ **Optymalizacja recordera** — ceny co cykl; OI/głębokość co `slow_every` cykli
+  z cache + równoległe pobieranie (ThreadPool) + stale-on-error. Recorder:
+  `--slow-every` (domyślnie 15). `slow_every=1` = stare zachowanie (zero regresji).
+- ✅ **#5 collateral/margin stress** — `MarginStressTester`: zdrowie nogi short-perp
+  pod ruchem +10/20/30%, per-symbol maintenance brackets (`MarginModel.mmr`),
+  raport per pozycja + summary (likwidacja/flatten/safe). Wciąż TODO: pełny model
+  gotówki spot-wallet vs futures-wallet (alokacja kapitału między nogami).
+- ◑ **#7 chaos-testy (część)** — dodane: martwa noga (perp nie domyka), mieszany
+  chaos spot-partial+perp-dead, restart między nogami + recovery do flat,
+  flatten-noop. Wciąż TODO: stale feed mid-sequence, DB write fail, lost-ack
+  (lost-ack świadomie odłożony do live transport — wymaga reconcile-before-retry,
+  inaczej ryzyko podwójnego filla).
+
+**Zostało (buildable-now):**
+
 4. **#8 alerty poza GUI + runbook** — Telegram/Discord/email (orphan_leg_age,
    net_delta, margin_health, funding divergence, data_lag, kill_state) + runbook
    operatora.
