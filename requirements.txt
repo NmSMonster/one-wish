@@ -1,0 +1,7 @@
+# One Wish — zależności backendu (Python 3.11+)
+websockets>=12          # serwer GUI API + (opcjonalnie) strumienie Binance
+PyYAML>=6               # risk_config.yaml
+# dane rynkowe Binance read-only idą przez stdlib (urllib) — bez dodatkowych zależności
+
+# --- tylko testy ---
+pytest>=8

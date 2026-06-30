@@ -1,0 +1,26 @@
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Virtual environments and local config
+.venv/
+venv/
+env/
+.env
+.env.*
+
+# Local runtime data and recordings
+data/*.jsonl
+data/*.json
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+!data/.gitkeep
+
+# Logs and local editor noise
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

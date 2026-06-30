@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="pl">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>One Wish Cockpit</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="brand-strip" aria-label="One Wish terminal">
+        <div class="brand-left">
+          <div class="wizard-mark">
+            <img src="./assets/one-wish-wizard-transparent.png" alt="One Wish wizard">
+          </div>
+          <div class="brand-copy">
+            <div class="brand-name">One wish</div>
+            <div class="brand-subline">BINANCE SPOT + USDT-M PERP - DELTA-NEUTRAL BASIS / FUNDING COCKPIT</div>
+          </div>
+        </div>
+        <div class="brand-metrics" aria-label="Market summary" id="brandMetrics">
+          <div><span>BTC BASIS</span><b data-brand-basis="BTC">NO DATA</b></div>
+          <div><span>ETH BASIS</span><b data-brand-basis="ETH">NO DATA</b></div>
+          <div><span>SOL BASIS</span><b data-brand-basis="SOL">NO DATA</b></div>
+          <div><span>XRP BASIS</span><b data-brand-basis="XRP">NO DATA</b></div>
+          <div><span>NET PNL</span><b id="brandNetPnl">NO DATA</b></div>
+          <div><span>RISK</span><b id="brandRisk">NO DATA</b></div>
+        </div>
+        <div class="brand-live">
+          <div class="brand-live-pill" id="brandConnection"><span></span> WAITING FOR FEED</div>
+          <strong id="brandClock">--:--:--</strong>
+          <small>UTC - LATENCY <span id="brandLatency">--</span>MS</small>
+        </div>
+      </header>
+
+      <div class="simulation-banner hidden" id="simulationBanner">
+        SIMULATION - MOCK DATA ONLY - NOT LIVE TRADING
+      </div>
+
+      <main class="dashboard">
+        <section class="panel status-panel">
+          <div class="panel-head">
+            <div class="panel-title"><span class="amber-dot"></span> BOT STATUS</div>
+            <div class="head-state" id="feedModeLabel">ADAPTER: MOCK</div>
+          </div>
+          <div class="status-grid">
+            <div class="status-card">
+              <span>BOT STATE</span>
+              <b id="botState">WAITING FOR FEED</b>
+            </div>
+            <div class="status-card">
+              <span>CONNECTION</span>
+              <b id="connectionState">DISCONNECTED</b>
+            </div>
+            <div class="status-card">
+              <span>LATENCY</span>
+              <b id="latencyMs">-- MS</b>
+            </div>
+            <div class="status-card">
+              <span>SERVER UTC</span>
+              <b id="serverTimeUtc">--</b>
+            </div>
+            <button class="kill-switch" id="killSwitch" type="button">
+              KILL SWITCH
+            </button>
+          </div>
+        </section>
+
+        <section class="panel market-panel">
+          <div class="panel-head">
+            <div class="panel-title"><span class="amber-dot"></span> MARKET DATA - SPOT / PERP / INDEX</div>
+            <div class="head-state">SOURCE: WEBSOCKET CONTRACT</div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Asset</th>
+                  <th>Spot</th>
+                  <th>Perp</th>
+                  <th>Index</th>
+                  <th>Basis bps</th>
+                  <th>Funding</th>
+                  <th>Predicted</th>
+                  <th>Next funding</th>
+                  <th>Lag</th>
+                </tr>
+              </thead>
+              <tbody id="marketRows"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel scanner-panel">
+          <div class="panel-head">
+            <div class="panel-title"><span class="amber-dot"></span> OPPORTUNITY SCANNER - REPRICING DETECTOR</div>
+            <div class="head-state">EDGE NET OF FEES / SLIPPAGE / SPREAD</div>
+          </div>
+          <div class="scanner-grid" id="signalCards"></div>
+        </section>
+
+        <section class="panel fair-panel">
+          <div class="panel-head">
+            <div class="panel-title"><span class="amber-dot"></span> FAIR VALUE - BASIS</div>
+            <select class="asset-select" id="assetSelect" aria-label="Select asset">
+              <option>BTC</option>
+              <option>ETH</option>
+              <option>SOL</option>
+              <option>XRP</option>
+            </select>
+            <div class="head-state">FAIR BASIS VS OBSERVED BASIS</div>
+          </div>
+          <div class="chart-shell">
+            <canvas id="fairValueChart"></canvas>
+            <div class="empty-state" id="fairValueEmpty">WAITING FOR FEED</div>
+          </div>
+          <div class="chart-legend">
+            <span><i class="legend-line fair"></i> Fair basis</span>
+            <span><i class="legend-line observed"></i> Observed basis</span>
+          </div>
+        </section>
+
+        <section class="panel positions-panel">
+          <div class="panel-head">
+            <div class="panel-title"><span class="amber-dot"></span> DELTA-NEUTRAL POSITIONS</div>
+            <div class="head-state">LONG SPOT + SHORT PERP</div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Asset</th>
+                  <th>Spot leg</th>
+                  <th>Perp leg</th>
+                  <th>Net delta</th>
+                  <th>Unrealized</th>
+                  <th>Funding</th>
+                  <th>Margin</th>
+                  <th>Hold</th>
+                </tr>
+              </thead>
+              <tbody id="positionRows"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel orders-panel">
+          <div class="panel-head">
+            <div class="panel-title"><span class="amber-dot"></span> ORDERS / FILLS</div>
+            <div class="head-state">LIVE EXECUTION LOG</div>
+          </div>
+          <div class="execution-list" id="executionLog"></div>
+        </section>
+
+        <section class="panel pnl-panel">
+          <div class="panel-head">
+            <div class="panel-title"><span class="amber-dot"></span> PNL</div>
+            <div class="head-state">REALIZED + UNREALIZED + FUNDING - FEES</div>
+          </div>
+          <div class="pnl-summary">
+            <div><span>Realized</span><b id="pnlRealized">NO DATA</b></div>
+            <div><span>Unrealized</span><b id="pnlUnrealized">NO DATA</b></div>
+            <div><span>Funding collected</span><b id="pnlFunding">NO DATA</b></div>
+            <div><span>Fees paid</span><b id="pnlFees">NO DATA</b></div>
+            <div><span>Net</span><b id="pnlNet">NO DATA</b></div>
+          </div>
+          <div class="chart-shell pnl-chart">
+            <canvas id="pnlChart"></canvas>
+            <div class="empty-state" id="pnlEmpty">WAITING FOR FEED</div>
+          </div>
+        </section>
+
+        <section class="panel risk-panel">
+          <div class="panel-head">
+            <div class="panel-title"><span class="amber-dot"></span> RISK</div>
+            <div class="head-state" id="riskDecision">NO DATA</div>
+          </div>
+          <div class="risk-grid" id="riskLimits"></div>
+          <div class="risk-reason" id="riskReason">WAITING FOR FEED</div>
+        </section>
+
+        <section class="panel events-panel">
+          <div class="panel-head">
+            <div class="panel-title"><span class="amber-dot"></span> EVENT LOG / AUDIT</div>
+            <div class="head-state">EVENT BUS STREAM</div>
+          </div>
+          <div class="event-log" id="eventLog"></div>
+        </section>
+      </main>
+    </div>
+
+    <script src="./js/config.js"></script>
+    <script src="./js/state.js"></script>
+    <script src="./js/adapters/mockAdapter.js"></script>
+    <script src="./js/adapters/wsAdapter.js"></script>
+    <script src="./js/render/utils.js"></script>
+    <script src="./js/render/statusPanel.js"></script>
+    <script src="./js/render/marketPanel.js"></script>
+    <script src="./js/render/scannerPanel.js"></script>
+    <script src="./js/render/chartPanel.js"></script>
+    <script src="./js/render/positionsPanel.js"></script>
+    <script src="./js/render/executionPanel.js"></script>
+    <script src="./js/render/riskPanel.js"></script>
+    <script src="./js/render/eventLogPanel.js"></script>
+    <script src="./js/app.js"></script>
+  </body>
+</html>

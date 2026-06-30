@@ -1,0 +1,26 @@
+# One Wish — konfiguracja ryzyka (M6)
+# Wartości CELOWO konserwatywne. Live i tak jest twardo zablokowany (M12).
+# To są limity dla pojedynczego, kontrolowanego pilota — nie do skalowania bez świadomej zmiany.
+
+# --- straty / wielkości ---
+max_daily_loss_usd: 50.0          # twardy stop na dzień po tej stracie zrealizowanej
+max_trade_notional_usd: 250.0     # maks. nominał pojedynczej pary (per noga ≈ połowa)
+max_asset_exposure_usd: 500.0     # maks. ekspozycja na jedno aktywo
+max_total_exposure_usd: 1500.0    # maks. łączna ekspozycja (proxy na korelację — wszystko to krypto)
+
+# --- liczność ---
+max_open_positions: 6             # maks. równoczesnych par
+max_trades_per_day: 200           # bezpiecznik na rozpędzenie się bota
+
+# --- jakość rynku (blokady wejścia) ---
+max_spread_bps: 8.0               # nie wchodzimy przy szerokim spreadzie
+min_depth_usd: 50000.0            # nie wchodzimy przy cienkiej płynności
+
+# --- margin / likwidacja nogi short-perp ---
+perp_leverage: 3.0                # niska dźwignia: short przeżyje ruch ~+33% (liquidation daleko)
+maintenance_margin_rate: 0.005    # ~0.5% (BTC; alty wyżej — do podniesienia per aktywo)
+margin_warn_health: 1.8           # ostrzeżenie marginowe
+margin_flatten_health: 1.3        # kontrolowany flatten pary ZANIM giełda zlikwiduje
+
+# --- bezpieczeństwo live ---
+live_trading_enabled: false       # MUSI zostać false do realnej walidacji edge (patrz EDGE_VALIDATION.md)
