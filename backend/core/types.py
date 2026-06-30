@@ -30,6 +30,15 @@ class Asset(str, Enum):
     HYPE = "HYPE"
 
 
+class Venue(str, Enum):
+    """Giełda/venue perpa. Multi-venue carry: shortujemy perp tam, gdzie funding
+    (annualizowany) jest najwyższy; spot trzymamy na najpłynniejszym venue."""
+    BINANCE = "BINANCE"
+    BYBIT = "BYBIT"
+    OKX = "OKX"
+    HYPERLIQUID = "HYPERLIQUID"
+
+
 #: Stała lista obsługiwanych aktywów (kolejność deterministyczna).
 ASSETS: tuple["Asset", ...] = (
     Asset.BTC, Asset.ETH, Asset.SOL, Asset.XRP,
