@@ -27,6 +27,12 @@ from backend.research.funding_study import (  # noqa: E402
     simulate_carry_positive_only,
     simulate_carry_smoothed,
 )
+from backend.research.portfolio_study import (  # noqa: E402
+    equal_weights,
+    funding_weights,
+    simulate_portfolio,
+    top_n_assets,
+)
 
 ROUND_TRIP_FEE_BPS = 18.6  # 2×(spot 7.5 + perp 1.8) — maker z rabatem BNB
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -34,6 +40,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def main() -> None:
     rows = []
+    rates_by_asset: dict[str, list[float]] = {}
     for asset in ASSETS:
         symbol = BINANCE_SYMBOL[asset]
         try:
@@ -42,6 +49,7 @@ def main() -> None:
             print(f"{asset.value}: blad sieci: {exc}")
             continue
         rates = rates_from_history(history)
+        rates_by_asset[asset.value] = rates
         rows.append({
             "asset": asset.value,
             "stats": analyze_funding(rates),
@@ -79,11 +87,53 @@ def main() -> None:
           "vs smoothed (trzymaj przez szum).")
     print("Smoothed >> pos-only dowodzi: NIE wychodzic na pojedynczym ujemnym funding.")
 
-    _write_doc(body, verdict_line)
+    portfolio_body = _portfolio_section(rows, rates_by_asset)
+    if portfolio_body:
+        print("\n" + portfolio_body)
+
+    _write_doc(body, verdict_line, portfolio_body)
 
 
-def _write_doc(table: str, verdict_line: str) -> None:
+def _portfolio_section(rows: list[dict], rates_by_asset: dict[str, list[float]]) -> str:
+    """Werdykt Tier A: równe wagi vs top-N vs ważenie funding, z ryzykiem (maxDD,
+    Calmar). Wagi liczy PRODUKCYJNA funkcja bota (FundingWeightedSizer.weight) —
+    badanie i egzekucja są spójne z definicji."""
+    traded = [r["asset"] for r in rows if r["stats"].annualized_pct > 0]
+    if len(traded) < 2:
+        return ""
+    mean_bps = {r["asset"]: r["stats"].mean_bps for r in rows if r["asset"] in traded}
+    smooth_pct = {r["asset"]: r["smooth"].annualized_net_pct for r in rows if r["asset"] in traded}
+    top4 = top_n_assets(smooth_pct, min(4, len(traded)))
+
+    variants = [
+        ("rowne wagi (wszystkie dodatnie)", equal_weights(traded)),
+        ("rowne wagi top-4 po carry", equal_weights(top4)),
+        ("wazone funding (wszystkie)", funding_weights(mean_bps)),
+        ("wazone funding top-4", funding_weights({k: mean_bps[k] for k in top4})),
+    ]
+    header = f"{'wariant':32} {'zwrot/rok':>10} {'maxDD':>7} {'Calmar':>7}  sklad"
+    out = ["PORTFEL TIER A — alokacja vs zwrot i ryzyko (polityka smoothed):",
+           header, "-" * len(header)]
+    for label, weights in variants:
+        try:
+            res = simulate_portfolio(rates_by_asset, weights,
+                                     round_trip_fee_bps=ROUND_TRIP_FEE_BPS, label=label)
+        except ValueError as exc:
+            out.append(f"{label:32} pominieto ({exc})")
+            continue
+        calmar = f"{res.calmar:6.1f}" if res.calmar is not None else "   inf"
+        skład = " ".join(f"{k}:{w:.0%}" for k, w in sorted(res.weights.items(), key=lambda kv: -kv[1]))
+        out.append(f"{label:32} {res.annualized_net_pct:9.2f}% {res.max_drawdown_pct:6.2f}% "
+                   f"{calmar}  {skład}")
+    out.append("")
+    out.append("Roznica 'wazone' vs 'rowne wagi' = zmierzony (nie obiecany) efekt Tier A.")
+    out.append("Dopiero TE liczby wolno wpisac jako nowy target zwrotu.")
+    return "\n".join(out)
+
+
+def _write_doc(table: str, verdict_line: str, portfolio_body: str = "") -> None:
     today = datetime.date.today().isoformat()
+    portfolio_block = f"\n```\n{portfolio_body}\n```\n" if portfolio_body else ""
     doc = f"""# CARRY — werdykt na realnej historii funding
 
 > Wygenerowane {today} przez `scripts/study_funding.py` na prawdziwej historii
@@ -94,6 +144,7 @@ def _write_doc(table: str, verdict_line: str) -> None:
 ```
 
 {verdict_line}
+{portfolio_block}
 
 ## Co z tego wynika
 

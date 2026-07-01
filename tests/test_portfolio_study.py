@@ -1,0 +1,124 @@
+"""Testy walidatora portfelowego Tier A: parytet ze smoothed, wagi, drawdown."""
+import pytest
+
+from backend.research.funding_study import simulate_carry_smoothed
+from backend.research.portfolio_study import (
+    align_tail,
+    equal_weights,
+    funding_weights,
+    normalize_weights,
+    simulate_portfolio,
+    smoothed_equity_curve,
+    top_n_assets,
+)
+
+FEE = 18.6
+
+
+def _const(rate: float, n: int) -> list[float]:
+    return [rate] * n
+
+
+# -- parytet z dotychczasowym werdyktem (co do bps) -------------------------- #
+def test_curve_final_matches_simulate_carry_smoothed():
+    # mieszana historia: dodatnia, dip, odwrócenie reżimu, powrót
+    rates = ([0.0002] * 30 + [-0.0001] * 2 + [0.0003] * 20
+             + [-0.0004] * 15 + [0.0002] * 40)
+    curve = smoothed_equity_curve(rates, FEE)
+    ref = simulate_carry_smoothed(rates, FEE)
+    assert len(curve) == len(rates)
+    assert abs(curve[-1] - ref.net_bps) < 1e-9        # identyczny wynik końcowy
+
+
+def test_single_asset_portfolio_equals_smoothed_annualized():
+    rates = _const(0.0002, 300)
+    res = simulate_portfolio({"BTC": rates}, {"BTC": 1.0}, round_trip_fee_bps=FEE)
+    ref = simulate_carry_smoothed(rates, FEE)
+    assert abs(res.final_net_bps - ref.net_bps) < 1e-9
+    assert abs(res.annualized_net_pct - ref.annualized_net_pct) < 1e-9
+
+
+# -- wagi -------------------------------------------------------------------- #
+def test_equal_weights_sum_to_one():
+    w = equal_weights(["A", "B", "C", "D"])
+    assert all(abs(v - 0.25) < 1e-12 for v in w.values())
+
+
+def test_normalize_drops_nonpositive_and_sums_to_one():
+    w = normalize_weights({"A": 2.0, "B": 0.0, "C": -1.0, "D": 2.0})
+    assert set(w) == {"A", "D"}
+    assert abs(sum(w.values()) - 1.0) < 1e-12
+
+
+def test_normalize_all_zero_raises():
+    with pytest.raises(ValueError):
+        normalize_weights({"A": 0.0, "B": -1.0})
+
+
+def test_funding_weights_use_production_sizer_semantics():
+    # BTC ~0.96 bps, DOGE ~2.53 bps (UNIVERSE_SCAN) → DOGE dostaje więcej kapitału
+    w = funding_weights({"BTC": 0.96, "DOGE": 2.53})
+    assert w["DOGE"] > w["BTC"]
+    assert abs(sum(w.values()) - 1.0) < 1e-12
+    # dokładny stosunek = stosunek wag sizera (0.96/1.5 vs 2.53/1.5, bez clampu)
+    assert abs(w["DOGE"] / w["BTC"] - 2.53 / 0.96) < 1e-9
+
+
+def test_funding_weights_clamped_for_extremes():
+    # ekstremalny funding nie zasysa całego kapitału (max_mult), ujemny nie zeruje (min_mult)
+    w = funding_weights({"HOT": 500.0, "COLD": -3.0})
+    assert abs(w["HOT"] / w["COLD"] - 2.0 / 0.5) < 1e-9   # stosunek = max_mult/min_mult
+
+
+def test_top_n_picks_best_by_metric():
+    m = {"BTC": 10.5, "ETH": 18.9, "SOL": 22.2, "XRP": 21.9, "DOGE": 27.7}
+    assert set(top_n_assets(m, 3)) == {"DOGE", "SOL", "XRP"}
+
+
+# -- align ------------------------------------------------------------------- #
+def test_align_tail_trims_to_common_recent_window():
+    out = align_tail({"A": [1.0, 2.0, 3.0, 4.0], "B": [9.0, 8.0]})
+    assert out["A"] == [3.0, 4.0]                 # ogon, nie początek
+    assert out["B"] == [9.0, 8.0]
+
+
+def test_align_tail_drops_empty_histories():
+    assert "B" not in align_tail({"A": [1.0], "B": []})
+
+
+# -- portfel: zwrot i ryzyko ------------------------------------------------- #
+def test_weighted_beats_equal_when_funding_differs():
+    rates = {"LOW": _const(0.0001, 600), "HIGH": _const(0.0003, 600)}
+    mean_bps = {"LOW": 1.0, "HIGH": 3.0}
+    eq = simulate_portfolio(rates, equal_weights(["LOW", "HIGH"]), round_trip_fee_bps=FEE)
+    fw = simulate_portfolio(rates, funding_weights(mean_bps, ref_funding_bps=1.5),
+                            round_trip_fee_bps=FEE)
+    assert fw.annualized_net_pct > eq.annualized_net_pct   # sedno Tier A
+
+
+def test_drawdown_measured_on_negative_stretch():
+    # 30 dodatnich → 12 mocno ujemnych (smoothed trzyma przez część minusów) → odbicie
+    rates = _const(0.0002, 30) + _const(-0.0005, 12) + _const(0.0002, 30)
+    res = simulate_portfolio({"X": rates}, {"X": 1.0}, round_trip_fee_bps=FEE)
+    assert res.max_drawdown_pct > 0
+    assert res.worst_settlement_bps < 0
+    assert res.calmar is not None
+
+
+def test_calmar_none_when_no_drawdown():
+    res = simulate_portfolio({"X": _const(0.0003, 200)}, {"X": 1.0},
+                             round_trip_fee_bps=0.0)     # bez fee krzywa tylko rośnie
+    assert res.max_drawdown_pct == 0.0
+    assert res.calmar is None
+
+
+def test_missing_history_for_weighted_asset_raises():
+    with pytest.raises(ValueError):
+        simulate_portfolio({"A": _const(0.0002, 10)}, {"A": 0.5, "GHOST": 0.5})
+
+
+def test_weights_are_normalized_in_result():
+    res = simulate_portfolio({"A": _const(0.0002, 50), "B": _const(0.0002, 50)},
+                             {"A": 3.0, "B": 1.0})
+    assert abs(res.weights["A"] - 0.75) < 1e-12
+    assert abs(sum(res.weights.values()) - 1.0) < 1e-12

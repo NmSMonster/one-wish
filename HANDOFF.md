@@ -9,7 +9,7 @@
 
 One Wish to **realny bot tradingowy**: delta-neutral **basis/funding carry** na
 Binance (long spot + short perp, inkasowanie funding). Backend Python, event-driven,
-**252 testy pytest zielone**. Edge (carry) **zwalidowany na ~roku realnej historii
+**267 testów pytest zielonych**. Edge (carry) **zwalidowany na ~roku realnej historii
 funding (~+18%/rok delta-neutral po prowizjach)**. Bot poprawnie wchodzi w carry na
 realnych danych. Realny handel jest **domyślnie zablokowany** — jesteśmy w fazie
 paper/walidacji, przed transportem na testnecie i pilotem.
@@ -29,7 +29,7 @@ Folder roboczy: katalog repo (na GitHubie). Testy: `python -m pytest -q`.
   prowizje — naprawione).
 - **Tryb „dislocation"** (opcjonalny, do badań): wejście na perp-rich spike.
 
-## 2. Status — co działa (252 testy zielone)
+## 2. Status — co działa (267 testów zielonych)
 
 Pełny pipeline event-driven (`backend/`):
 
@@ -101,10 +101,11 @@ backend/
   app/         pipeline, runner (OneWishApp), report, budget (kapitał paper-live)
   backtest/    engine (Backtester), metrics
   research/    edge_validation (M3.5), funding_study (werdykt carry),
+               portfolio_study (walidator Tier A: wagi vs zwrot/ryzyko),
                universe (ranking aktywów), recorder (zapis ticków)
 scripts/       study_funding, run_backtest, run_edge_validation, run_paper_live,
                record_market, record_liquidations, scan_universe, run_testnet_smoke
-tests/         pełna suita pytest (252)
+tests/         pełna suita pytest (267)
 Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md,
                CARRY_VERDICT.md, UNIVERSE_SCAN.md, DATA_CONTRACT.md, RUNBOOK.md, ten HANDOFF.md
 ```
@@ -112,7 +113,7 @@ Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md
 ## 6. Jak uruchomić
 
 ```
-python -m pytest -q                              # 252 testy
+python -m pytest -q                              # 267 testów
 python scripts/study_funding.py                  # werdykt carry na historii funding (natychmiast)
 python scripts/scan_universe.py --top 25         # ranking aktywów po carry
 python scripts/run_backtest.py                   # backtest carry vs scalp (synthetic)
@@ -196,6 +197,18 @@ Z przeglądów Codexa „survive live" — zrobione: P0 OrderManager, #4 kwantyz
   wyższe ryzyko venue/counterparty) świadomie odłożony jako faza 2, PO zwalidowaniu
   Tier A na realnych danych — enum `Venue` (core/types.py) to nieużywany jeszcze stub
   pod tę fazę.
+- ✅ **Tier A #2: walidator portfelowy** (`backend/research/portfolio_study.py`) —
+  narzędzie, które zamienia obietnicę Tier A w POMIAR: porównuje na historii funding
+  równe wagi vs top-N vs ważenie funding, z metrykami ryzyka (max drawdown, Calmar,
+  najgorsze rozliczenie) z krzywej kapitału per rozliczenie. Kluczowa uczciwość:
+  wagi liczy PRODUKCYJNA funkcja bota (`FundingWeightedSizer.weight`) — badanie i
+  egzekucja nie mogą się rozjechać; polityka per aktywo = smoothed z parytetem co do
+  bps z `simulate_carry_smoothed` (test); historie wyrównane od ogona. Wpięte w
+  `scripts/study_funding.py` — sekcja „PORTFEL TIER A" w wydruku i CARRY_VERDICT.md.
+  **Jak dostać realny werdykt Tier A:** `python scripts/study_funding.py` na maszynie
+  z dostępem do Binance → tabela wariantów z zwrot/maxDD/Calmar; dopiero TE liczby
+  wpisać jako nowy target. (Smoke offline na profilach z UNIVERSE_SCAN: równe ~17.6%
+  → ważone top-4 ~20.9% — ilustracja działania narzędzia, NIE werdykt.)
 
 **Zostało (buildable-now):**
 
