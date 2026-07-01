@@ -15,7 +15,7 @@ from ..model.costs import CostModel
 from ..model.fair_value import FairValueModel
 from ..risk import CircuitBreaker, MarginModel, MarginWatchdog, RiskConfig, RiskManager
 from ..signal import RepricingDetector
-from ..strategy import StrategyPolicy
+from ..strategy import FundingWeightedSizer, StrategyPolicy
 
 
 class Pipeline:
@@ -31,6 +31,8 @@ class Pipeline:
         cost_model: CostModel | None = None,
         detector_kwargs: dict | None = None,
         policy_mode: str = "carry",
+        funding_weighted: bool = False,
+        sizer_kwargs: dict | None = None,
     ) -> None:
         self.bus = bus
         self.clock = clock or RealClock()
@@ -38,12 +40,23 @@ class Pipeline:
         self.broker = broker or PaperBrokerAdapter(clock=self.clock)
         self.fair = fair_model or FairValueModel()
         self.cost = cost_model or CostModel()
-        det_kwargs = {"notional_usd": notional_usd}
+        risk_config = risk_config or RiskConfig()
+        sizer = None
+        if funding_weighted and policy_mode == "carry":
+            # Tier A: waż nominał siłą forward funding zamiast płaskiej kwoty na parę.
+            # Cap górny = limit RiskManagera, żeby sizer nie proponował nominałów,
+            # które i tak zostaną odrzucone. Ten SAM obiekt idzie do detektora (depth-
+            # check/koszt) i do polityki (realny nominał zlecenia) — muszą być spójne.
+            sk = {"base_notional_usd": notional_usd, "max_notional_usd": risk_config.max_trade_notional_usd}
+            sk.update(sizer_kwargs or {})
+            sizer = FundingWeightedSizer(**sk)
+        self.sizer = sizer
+        det_kwargs = {"notional_usd": notional_usd, "sizer": sizer}
         det_kwargs.update(detector_kwargs or {})
         self.detector = RepricingDetector(self.fair, self.cost, **det_kwargs)
-        self.policy = StrategyPolicy(notional_usd=notional_usd, mode=policy_mode)
+        self.policy = StrategyPolicy(notional_usd=notional_usd, mode=policy_mode, sizer=sizer)
         self.circuit = CircuitBreaker()
-        self.risk = RiskManager(risk_config or RiskConfig(), clock=self.clock, circuit=self.circuit)
+        self.risk = RiskManager(risk_config, clock=self.clock, circuit=self.circuit)
         self.execution = ExecutionEngine(self.broker, self.book, clock=self.clock)
         self.funding = FundingAccrual(self.book)
         rc = self.risk.config

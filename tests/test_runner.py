@@ -100,3 +100,38 @@ def test_app_synthetic_runs_and_reports():
     assert isinstance(report.net, float)
     assert "RAPORT DZIENNY" in report.summary()
     assert report.counts.get("EDGE_DETECTED", 0) > 0
+
+
+# -- Tier A: wiring funding_weighted przez Pipeline/OneWishApp -------------- #
+def test_pipeline_funding_weighted_off_by_default():
+    bus = EventBus()
+    pipe = Pipeline(bus, risk_config=_generous(), broker=PaperBrokerAdapter(seed=1), clock=SimClock())
+    assert pipe.sizer is None
+    assert pipe.policy.sizer is None
+
+
+def test_pipeline_funding_weighted_builds_sizer_from_risk_config():
+    bus = EventBus()
+    rc = _generous()
+    pipe = Pipeline(bus, risk_config=rc, notional_usd=150.0,
+                    broker=PaperBrokerAdapter(seed=1), clock=SimClock(),
+                    funding_weighted=True)
+    assert pipe.sizer is not None
+    assert pipe.sizer.base_notional_usd == 150.0
+    assert pipe.sizer.max_notional_usd == rc.max_trade_notional_usd
+    assert pipe.policy.sizer is pipe.sizer
+
+
+def test_pipeline_funding_weighted_ignored_outside_carry_mode():
+    bus = EventBus()
+    pipe = Pipeline(bus, risk_config=_generous(), broker=PaperBrokerAdapter(seed=1),
+                    clock=SimClock(), policy_mode="scalp", funding_weighted=True)
+    assert pipe.sizer is None       # sizer semantyka funding_bps jest specyficzna dla "carry"
+
+
+def test_app_funding_weighted_runs_green():
+    app = OneWishApp(mode="synthetic", steps=200, seed=3, gui=False,
+                     risk_config=_generous(), notional_usd=200.0, funding_weighted=True)
+    report = asyncio.run(app.run())
+    assert report.counts.get("MARKET_TICK", 0) > 0
+    assert isinstance(report.net, float)   # przeszło bez wyjątku z sizerem aktywnym

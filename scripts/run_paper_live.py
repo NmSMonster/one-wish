@@ -7,6 +7,7 @@ Użycie:
     python scripts/run_paper_live.py --mode synthetic --watch
     python scripts/run_paper_live.py --mode live --cycles 60
     python scripts/run_paper_live.py --mode live --budget-pln 150   # forward paper-trade
+    python scripts/run_paper_live.py --mode live --funding-weighted # Tier A: waż nominał funding
 """
 from __future__ import annotations
 
@@ -39,6 +40,9 @@ def main() -> None:
     ap.add_argument("--budget-pln", type=float, default=None,
                     help="forward paper-trade: fikcyjny budżet w zł (limit ekspozycji + tracking). "
                          "Egzekucja NADAL papierowa — zero realnych pieniędzy.")
+    ap.add_argument("--funding-weighted", action="store_true",
+                    help="Tier A: waż nominał pozycji siłą forward funding zamiast płaskiej "
+                         "kwoty na parę (więcej kapitału do wyżej płacących aktywów).")
     args = ap.parse_args()
 
     risk = RiskConfig.from_yaml(_RISK_YAML) if os.path.exists(_RISK_YAML) else RiskConfig()
@@ -52,10 +56,13 @@ def main() -> None:
         live_cycles=args.cycles,
         risk_config=risk,
         budget_pln=args.budget_pln,
+        funding_weighted=args.funding_weighted,
     )
     if args.budget_pln is not None:
         print(f"Forward paper-trade: budżet {args.budget_pln:.0f} zł ≈ {app.budget_usd:.2f}$ "
               f"(cap ekspozycji {app.risk_config.max_total_exposure_usd:.2f}$). Egzekucja PAPIEROWA.")
+    if args.funding_weighted:
+        print("Tier A: sizing ważony forward funding (więcej kapitału do wyżej płacących aktywów).")
     if not args.no_gui:
         print(f"GUI: otworz index.html (config adapter=\"ws\") -> ws://127.0.0.1:{args.port}/gui")
     report = asyncio.run(app.run())

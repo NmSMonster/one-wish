@@ -24,10 +24,14 @@ class StrategyPolicy:
 
     def __init__(self, *, notional_usd: float = 200.0, bus: EventBus | None = None,
                  mode: str = "carry", funding_exit: float = 0.0,
-                 basis_stop_bps: float = -15.0, funding_ema_alpha: float = 0.05) -> None:
+                 basis_stop_bps: float = -15.0, funding_ema_alpha: float = 0.05,
+                 sizer=None) -> None:
         self.notional_usd = notional_usd
         self._bus = bus
         self.mode = mode
+        # Tier A: opcjonalny sizer waży nominał siłą sygnału (funding_bps) zamiast
+        # płaskiego notional_usd na każdą parę. None = stare zachowanie (płaski nominał).
+        self.sizer = sizer
         self.funding_exit = funding_exit          # zamknij, gdy WYGŁADZONY funding ≤ to
         self.basis_stop_bps = basis_stop_bps      # zamknij, gdy observed basis ≤ to (perp za tani)
         # EMA forward funding: nie wychodzimy na pojedynczym ujemnym ticku (churn pali
@@ -50,9 +54,13 @@ class StrategyPolicy:
             bus.subscribe(EventType.MARKET_TICK, self._on_tick_carry)
 
     async def _emit_open(self, asset, ts, edge, reason) -> None:
+        # `edge` w trybie carry to forward funding_bps (Signal.expected_net_edge_bps) —
+        # dokładnie to, czym sizer waży kapitał. W trybie dislocation `edge` ma inną
+        # semantykę (net edge disloc+carry-cost); sizer jest wtedy opt-in świadomie.
+        notional = self.sizer.size(edge) if self.sizer is not None else self.notional_usd
         self._inflight.add(asset)
         await self._bus.publish(Event(EventType.TRADE_INTENT, ts, self.SOURCE,
-                                      payload=TradeIntent(asset, ts, "OPEN", self.notional_usd,
+                                      payload=TradeIntent(asset, ts, "OPEN", notional,
                                                           edge, reason)))
 
     async def _emit_close(self, asset, ts, reason) -> None:

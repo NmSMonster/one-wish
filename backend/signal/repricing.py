@@ -44,6 +44,7 @@ class RepricingDetector:
         depth_mult: float = 5.0,             # depth ≥ depth_mult × notional
         max_data_lag_ms: float = 5000.0,     # tolerujemy skew zegara; realną nieświeżość łapie STALE_FEED
         min_seconds_to_funding: float = 60.0,
+        sizer=None,
     ) -> None:
         self.model = model
         self.cost_model = cost_model
@@ -58,14 +59,24 @@ class RepricingDetector:
         self.depth_mult = depth_mult
         self.max_data_lag_ms = max_data_lag_ms
         self.min_seconds_to_funding = min_seconds_to_funding
+        # Tier A: gdy sizer aktywny (tryb carry), depth-check i koszt MUSZĄ liczyć się
+        # na tym samym efektywnym nominale, jaki realnie wystawi StrategyPolicy —
+        # inaczej ważona (większa) pozycja przechodzi bramkę płynności policzoną dla
+        # mniejszego, płaskiego nominału i margines bezpieczeństwa jest zawyżony.
+        self.sizer = sizer
         self._last_state: dict = {}
         self._bus: EventBus | None = None
 
-    def _quality_reasons(self, tick: MarketTick) -> list[str]:
+    def _effective_notional(self, funding_bps: float) -> float:
+        if self.sizer is not None and self.entry_mode == "carry":
+            return self.sizer.size(funding_bps)
+        return self.notional_usd
+
+    def _quality_reasons(self, tick: MarketTick, notional_usd: float) -> list[str]:
         reasons: list[str] = []
         if max(tick.spot_spread_bps, tick.perp_spread_bps) > self.max_spread_bps:
             reasons.append("spread za szeroki")
-        if min(tick.spot_depth_usd, tick.perp_depth_usd) < self.depth_mult * self.notional_usd:
+        if min(tick.spot_depth_usd, tick.perp_depth_usd) < self.depth_mult * notional_usd:
             reasons.append("za mała płynność")
         if tick.data_lag_ms > self.max_data_lag_ms:
             reasons.append("dane nieświeże")
@@ -77,11 +88,14 @@ class RepricingDetector:
         fv = self.model.evaluate(tick)
         observed = tick.basis_bps
         dislocation = observed - fv.fair_basis_bps
-        cost = self.cost_model.round_trip_cost_bps(tick, self.notional_usd)
         funding_bps = tick.predicted_funding * 1e4
         carry = fv.expected_funding_bps
 
-        reasons = self._quality_reasons(tick)
+        # Efektywny nominał: jeśli sizer aktywny, to TO on decyduje o realnej wielkości
+        # pozycji — koszt i próg płynności muszą liczyć się na tej samej wartości.
+        notional = self._effective_notional(funding_bps)
+        cost = self.cost_model.round_trip_cost_bps(tick, notional)
+        reasons = self._quality_reasons(tick, notional)
 
         if self.entry_mode == "dislocation":
             net = dislocation + carry - cost.total_bps

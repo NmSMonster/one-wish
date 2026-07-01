@@ -7,6 +7,7 @@ from backend.core.types import Asset, MarketTick, SignalState
 from backend.model.costs import CostModel
 from backend.model.fair_value import FairValueModel
 from backend.signal import RepricingDetector
+from backend.strategy import FundingWeightedSizer
 
 
 def tick_with(basis_bps, *, funding=0.0002, spot_spread_bps=1.0, perp_spread_bps=1.0,
@@ -117,3 +118,53 @@ def test_edge_then_lost_transition_emits_events():
     asyncio.run(run())
     assert EventType.EDGE_DETECTED in captured
     assert EventType.EDGE_LOST in captured  # przejście edge → brak edge
+
+
+# -- Tier A: sizer-aware depth/koszt w detektorze (spójność z realnym nominałem) -- #
+def _carry_detector(sizer=None, **kw) -> RepricingDetector:
+    kw.setdefault("depth_mult", 5.0)
+    return RepricingDetector(FairValueModel(), CostModel(), entry_mode="carry",
+                             notional_usd=200.0, sizer=sizer, **kw)
+
+
+def test_sizer_scaled_notional_fails_depth_that_flat_notional_would_pass():
+    # funding=2bps → sizer (ref=1.0, min=1.0, max=2.0) waży ×2.0 → efektywny nominał 400$
+    # → wymagana głębokość 5×400=2000. depth=1500 przechodzi próg PŁASKI (5×200=1000),
+    # ale NIE przechodzi progu ważonego sizerem — to właśnie ta luka, którą naprawiliśmy.
+    sizer = FundingWeightedSizer(base_notional_usd=200.0, ref_funding_bps=1.0,
+                                 min_mult=1.0, max_mult=2.0)
+    tick = tick_with(5.0, funding=0.0002, depth=1500.0)   # funding_bps = 2.0
+
+    flat = _carry_detector(sizer=None).evaluate(tick)
+    weighted = _carry_detector(sizer=sizer).evaluate(tick)
+
+    assert flat.state == SignalState.EDGE_DETECTED          # płaski nominał: depth wystarcza
+    assert weighted.state == SignalState.NO_TRADE            # ważony nominał: depth NIE wystarcza
+    assert "płynność" in weighted.reason
+
+
+def test_sizer_scaled_notional_increases_cost_estimate():
+    sizer = FundingWeightedSizer(base_notional_usd=200.0, ref_funding_bps=1.0,
+                                 min_mult=1.0, max_mult=2.0)
+    tick = tick_with(5.0, funding=0.0002, depth=50_000.0)   # depth spokojnie wystarcza obu
+
+    flat = _carry_detector(sizer=None).evaluate(tick)
+    weighted = _carry_detector(sizer=sizer).evaluate(tick)
+
+    assert flat.state == SignalState.EDGE_DETECTED
+    assert weighted.state == SignalState.EDGE_DETECTED
+    # ważony nominał (2×) → wyższy realny poślizg → wyższy szacowany koszt
+    assert weighted.cost_bps > flat.cost_bps
+
+
+def test_sizer_ignored_in_dislocation_mode():
+    sizer = FundingWeightedSizer(base_notional_usd=200.0, ref_funding_bps=1.0,
+                                 min_mult=1.0, max_mult=2.0)
+    det = RepricingDetector(FairValueModel(), CostModel(), entry_mode="dislocation",
+                            notional_usd=200.0, sizer=sizer)
+    tick = tick_with(50.0, funding=0.0002, depth=1500.0)
+    sig = det.evaluate(tick)
+    # dislocation: sizer NIE wpływa (semantyka funding_bps specyficzna dla carry)
+    assert sig.cost_bps == RepricingDetector(FairValueModel(), CostModel(),
+                                             entry_mode="dislocation", notional_usd=200.0
+                                             ).evaluate(tick).cost_bps

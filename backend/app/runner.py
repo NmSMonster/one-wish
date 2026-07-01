@@ -48,6 +48,7 @@ class OneWishApp:
         poll_interval: float = 2.0,
         alerts: bool = True,
         budget_pln: float | None = None,
+        funding_weighted: bool = False,
     ) -> None:
         self.mode = mode
         self.steps = steps
@@ -61,6 +62,10 @@ class OneWishApp:
         self.live_cycles = live_cycles
         self.poll_interval = poll_interval
         self.alerts = alerts
+        # Tier A: waż nominał siłą forward funding (patrz backend/strategy/sizing.py)
+        # zamiast płaskiej kwoty na każdą parę — kapitał przesuwa się w stronę wyżej
+        # płacących aktywów. Opt-in, domyślnie wyłączone (zero zmiany zachowania).
+        self.funding_weighted = funding_weighted
         self.telemetry: CostTelemetry | None = None
         # Fikcyjny budżet (forward paper-trade): ogranicza ekspozycję do budżetu i
         # śledzi jego wykorzystanie. Tylko paper — nie dotyka realnych pieniędzy.
@@ -94,7 +99,7 @@ class OneWishApp:
 
         broker = PaperBrokerAdapter(slippage_bps=1.0, seed=1, clock=clock)
         pipe = Pipeline(bus, risk_config=self.risk_config, notional_usd=self.notional_usd,
-                        broker=broker, clock=clock)
+                        broker=broker, clock=clock, funding_weighted=self.funding_weighted)
 
         monitor = Monitor(bus, max_daily_loss_usd=self.risk_config.max_daily_loss_usd, clock=clock)
         monitor.attach(bus)

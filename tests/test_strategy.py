@@ -4,13 +4,13 @@ import asyncio
 from backend.core.bus import EventBus
 from backend.core.events import Event, EventType
 from backend.core.types import Asset, Position, Signal, SignalState, TradeIntent
-from backend.strategy import StrategyPolicy
+from backend.strategy import FundingWeightedSizer, StrategyPolicy
 from tests.test_repricing import tick_with
 
 
-def _signal(asset=Asset.BTC, state=SignalState.EDGE_DETECTED) -> Signal:
+def _signal(asset=Asset.BTC, state=SignalState.EDGE_DETECTED, edge_bps=5.0) -> Signal:
     return Signal(asset=asset, ts=1.0, state=state, observed_basis_bps=10.0,
-                  fair_basis_bps=2.0, dislocation_bps=8.0, expected_net_edge_bps=5.0,
+                  fair_basis_bps=2.0, dislocation_bps=8.0, expected_net_edge_bps=edge_bps,
                   cost_bps=20.0, reason="x")
 
 
@@ -119,3 +119,40 @@ def test_carry_exits_on_basis_stop():
 
     asyncio.run(run())
     assert [i.action for i in intents] == ["OPEN", "CLOSE"]
+
+
+# -- Tier A: sizer waży notional_usd siłą sygnału --------------------------- #
+def test_without_sizer_uses_flat_notional():
+    bus = EventBus()
+    policy = StrategyPolicy(notional_usd=200.0, mode="carry")
+    policy.attach(bus)
+    intents: list[TradeIntent] = []
+    bus.subscribe(EventType.TRADE_INTENT, lambda e: intents.append(e.payload))
+
+    asyncio.run(bus.publish(Event(EventType.EDGE_DETECTED, 1.0, "d",
+                                  payload=_signal(edge_bps=2.53))))
+    assert intents[0].notional_usd == 200.0    # bez sizera: zawsze płaski nominał
+
+
+def test_with_sizer_notional_scales_with_edge():
+    bus = EventBus()
+    sizer = FundingWeightedSizer(base_notional_usd=100.0, ref_funding_bps=1.5,
+                                 min_mult=0.5, max_mult=2.0)
+    policy = StrategyPolicy(notional_usd=100.0, mode="carry", sizer=sizer)
+    policy.attach(bus)
+    intents: list[TradeIntent] = []
+    bus.subscribe(EventType.TRADE_INTENT, lambda e: intents.append(e.payload))
+
+    async def run():
+        await bus.publish(Event(EventType.EDGE_DETECTED, 1.0, "d",
+                                payload=_signal(asset=Asset.BTC, edge_bps=0.96)))
+        await bus.publish(Event(EventType.POSITION_OPENED, 1.0, "e", payload=_position(Asset.BTC)))
+        await bus.publish(Event(EventType.EDGE_DETECTED, 2.0, "d",
+                                payload=_signal(asset=Asset.ETH, edge_bps=2.53)))
+    asyncio.run(run())
+
+    btc_notional = intents[0].notional_usd
+    eth_notional = intents[1].notional_usd
+    assert btc_notional < 100.0 < eth_notional     # niski funding mniej kapitału, wysoki więcej
+    assert abs(btc_notional - sizer.size(0.96)) < 1e-9
+    assert abs(eth_notional - sizer.size(2.53)) < 1e-9
