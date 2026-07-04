@@ -22,7 +22,8 @@ funding to dominujący, ale nie jedyny składnik PnL.
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from statistics import fmean
 
 from ..strategy.sizing import FundingWeightedSizer
 
@@ -155,3 +156,89 @@ def simulate_portfolio(rates_by_asset: dict[str, list[float]], weights: dict[str
         calmar=calmar,
         worst_settlement_bps=min(per_settlement),
     )
+
+
+def return_on_capital(annualized_notional_pct: float, perp_leverage: float) -> float:
+    """Przelicza zwrot z NOMINAŁU pary na zwrot z KAPITAŁU właściciela.
+
+    Funding nalicza się od nominału N, ale kapitał związany w parze to
+    N (spot) + N/dźwignia (depozyt perp) = N·(1+1/lev). Stąd
+    ROC = zwrot_nominalny × lev/(lev+1) — przy 3x to ×0.75. Kwotowane w werdyktach
+    ~18% jest per-notional; właściciela interesuje TA liczba."""
+    if perp_leverage <= 0:
+        return 0.0
+    return annualized_notional_pct * perp_leverage / (perp_leverage + 1.0)
+
+
+# -- walk-forward: selekcja out-of-sample (bez look-ahead) ------------------- #
+@dataclass
+class WalkForwardWindow:
+    train_start: int
+    test_start: int
+    test_end: int
+    weights: dict[str, float]        # skład wybrany NA TRENINGU ({} = okno bez handlu)
+    net_bps: float                   # wynik na oknie TESTOWYM
+    annualized_net_pct: float
+
+
+@dataclass
+class WalkForwardResult:
+    label: str
+    train: int
+    test: int
+    windows: list[WalkForwardWindow] = field(default_factory=list)
+    total_net_bps: float = 0.0
+    n_test_periods: int = 0
+
+    @property
+    def annualized_net_pct(self) -> float:
+        years = self.n_test_periods / _SETTLE_PER_YEAR
+        return (self.total_net_bps / 100.0) / years if years > 0 else 0.0
+
+
+def walk_forward(rates_by_asset: dict[str, list[float]], *, train: int, test: int,
+                 round_trip_fee_bps: float = 18.6, window: int = 9,
+                 top_n: int | None = None, funding_weighted: bool = True,
+                 ref_funding_bps: float = 1.5, label: str = "walk-forward") -> WalkForwardResult:
+    """Uczciwa (out-of-sample) wersja werdyktu portfelowego: skład i wagi wybierane
+    WYŁĄCZNIE na oknie treningowym (`train` rozliczeń), wynik mierzony na NASTĘPNYM
+    oknie (`test` rozliczeń), okno przesuwa się o `test`. Eliminuje look-ahead bias
+    selekcji top-N/wag (in-sample wybiera zwycięzców z perspektywy czasu).
+
+    Konserwatywnie: każde okno testowe rusza „na zimno" (świeże wejście = świeże
+    round-trip fee per aktywo) — wynik OOS jest raczej zaniżony niż zawyżony.
+    Okna, w których trening nie wskazał żadnego aktywa z dodatnim funding, nie
+    handlują (wkład 0, uczciwie liczone do czasu)."""
+    aligned = align_tail(rates_by_asset)
+    if not aligned:
+        raise ValueError("brak historii funding")
+    n = min(len(v) for v in aligned.values())
+    if n < train + test:
+        raise ValueError(f"historia za krótka: {n} < train+test = {train + test}")
+
+    result = WalkForwardResult(label=label, train=train, test=test)
+    for start in range(train, n - test + 1, test):
+        train_slices = {k: v[start - train:start] for k, v in aligned.items()}
+        test_slices = {k: v[start:start + test] for k, v in aligned.items()}
+
+        mean_bps = {k: fmean(v) * 1e4 for k, v in train_slices.items()}
+        candidates = {k: m for k, m in mean_bps.items() if m > 0}
+        if top_n is not None and candidates:
+            keep = top_n_assets(candidates, top_n)
+            candidates = {k: candidates[k] for k in keep}
+
+        if not candidates:
+            result.windows.append(WalkForwardWindow(start - train, start, start + test, {}, 0.0, 0.0))
+            result.n_test_periods += test
+            continue
+
+        weights = (funding_weights(candidates, ref_funding_bps=ref_funding_bps)
+                   if funding_weighted else equal_weights(list(candidates)))
+        res = simulate_portfolio(test_slices, weights,
+                                 round_trip_fee_bps=round_trip_fee_bps, window=window)
+        result.windows.append(WalkForwardWindow(start - train, start, start + test,
+                                                res.weights, res.final_net_bps,
+                                                res.annualized_net_pct))
+        result.total_net_bps += res.final_net_bps
+        result.n_test_periods += test
+    return result

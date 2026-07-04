@@ -49,6 +49,33 @@ def rates_from_history(history: list[dict]) -> list[float]:
     return out
 
 
+_FUNDING_PERIOD_MS = 8 * 3600 * 1000  # rozliczenie co 8h
+
+
+def count_funding_gaps(history: list[dict], tol_frac: float = 0.25) -> dict:
+    """Sprawdza spójność historii funding po `fundingTime`: ile rozliczeń brakuje
+    (odstęp > 8h) i ile jest zduplikowanych/nietypowo bliskich (odstęp < 8h). Cienki
+    edge carry jest wrażliwy na luki — jedno przegapione rozliczenie to realny bps.
+    Zwraca liczbę brakujących rozliczeń (oszacowaną z rozmiaru luk) i anomalii."""
+    times = []
+    for item in history:
+        try:
+            times.append(int(item["fundingTime"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+    times.sort()
+    tol = _FUNDING_PERIOD_MS * tol_frac
+    missing = 0
+    anomalies = 0
+    for prev, cur in zip(times, times[1:]):
+        gap = cur - prev
+        if gap > _FUNDING_PERIOD_MS + tol:
+            missing += round(gap / _FUNDING_PERIOD_MS) - 1
+        elif gap < _FUNDING_PERIOD_MS - tol:
+            anomalies += 1
+    return {"n": len(times), "missing_settlements": missing, "irregular_gaps": anomalies}
+
+
 def analyze_funding(rates: list[float]) -> FundingStats:
     if not rates:
         return FundingStats(0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)

@@ -9,7 +9,7 @@
 
 One Wish to **realny bot tradingowy**: delta-neutral **basis/funding carry** na
 Binance (long spot + short perp, inkasowanie funding). Backend Python, event-driven,
-**267 testów pytest zielonych**. Edge (carry) **zwalidowany na ~roku realnej historii
+**274 testy pytest zielone**. Edge (carry) **zwalidowany na ~roku realnej historii
 funding (~+18%/rok delta-neutral po prowizjach)**. Bot poprawnie wchodzi w carry na
 realnych danych. Realny handel jest **domyślnie zablokowany** — jesteśmy w fazie
 paper/walidacji, przed transportem na testnecie i pilotem.
@@ -29,7 +29,7 @@ Folder roboczy: katalog repo (na GitHubie). Testy: `python -m pytest -q`.
   prowizje — naprawione).
 - **Tryb „dislocation"** (opcjonalny, do badań): wejście na perp-rich spike.
 
-## 2. Status — co działa (267 testów zielonych)
+## 2. Status — co działa (274 testy zielone)
 
 Pełny pipeline event-driven (`backend/`):
 
@@ -105,7 +105,7 @@ backend/
                universe (ranking aktywów), recorder (zapis ticków)
 scripts/       study_funding, run_backtest, run_edge_validation, run_paper_live,
                record_market, record_liquidations, scan_universe, run_testnet_smoke
-tests/         pełna suita pytest (267)
+tests/         pełna suita pytest (274)
 Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md,
                CARRY_VERDICT.md, UNIVERSE_SCAN.md, DATA_CONTRACT.md, RUNBOOK.md, ten HANDOFF.md
 ```
@@ -113,7 +113,7 @@ Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md
 ## 6. Jak uruchomić
 
 ```
-python -m pytest -q                              # 267 testów
+python -m pytest -q                              # 274 testy
 python scripts/study_funding.py                  # werdykt carry na historii funding (natychmiast)
 python scripts/scan_universe.py --top 25         # ranking aktywów po carry
 python scripts/run_backtest.py                   # backtest carry vs scalp (synthetic)
@@ -209,6 +209,22 @@ Z przeglądów Codexa „survive live" — zrobione: P0 OrderManager, #4 kwantyz
   z dostępem do Binance → tabela wariantów z zwrot/maxDD/Calmar; dopiero TE liczby
   wpisać jako nowy target. (Smoke offline na profilach z UNIVERSE_SCAN: równe ~17.6%
   → ważone top-4 ~20.9% — ilustracja działania narzędzia, NIE werdykt.)
+- ✅ **Tier A #3: rygor walidatora (anty-look-ahead + realizm)** — przed spaleniem
+  „jednego strzału" na realnych danych dorzucone cztery rzeczy, które zamieniają
+  optymistyczną liczbę w uczciwą:
+  1. **Walk-forward OUT-OF-SAMPLE** (`walk_forward`): selekcja top-N i wagi wybierane
+     WYŁĄCZNIE na oknie treningowym, wynik mierzony na następnym — eliminuje
+     look-ahead bias („wybraliśmy zwycięzców z perspektywy czasu"). Konserwatywnie:
+     każde okno rusza na zimno (świeże fee); okna bez dodatniego funding nie handlują.
+  2. **Zwrot na KAPITALE** (`return_on_capital`): ~18% liczone jest od nominału pary,
+     a kapitał = nominał + depozyt perp → przy 3x realny zwrot ×0.75. Werdykt pokazuje
+     obie kolumny (nominał / kapitał).
+  3. **Wrażliwość na fee**: cała tabela liczona dla maker (18.6 bps) I taker (30 bps).
+  4. **Jakość danych** (`count_funding_gaps`): detekcja brakujących/nieregularnych
+     rozliczeń w historii + `pages=4→6` (~400 dni jak w UNIVERSE_SCAN).
+  Do targetu bierz liczbę **WALK-FORWARD na kapitale** — reszta jest in-sample
+  (optymistyczna). Smoke offline (profile UNIVERSE_SCAN): nagłówkowe ~21% na nominale
+  in-sample → **~15.6% na kapitale out-of-sample** — to jest uczciwy rząd wielkości.
 
 **Zostało (buildable-now):**
 

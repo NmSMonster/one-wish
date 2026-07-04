@@ -22,6 +22,7 @@ from backend.adapters.market.binance_public import fetch_funding_history_paged  
 from backend.core.types import ASSETS, BINANCE_SYMBOL  # noqa: E402
 from backend.research.funding_study import (  # noqa: E402
     analyze_funding,
+    count_funding_gaps,
     rates_from_history,
     simulate_carry_always_in,
     simulate_carry_positive_only,
@@ -30,11 +31,15 @@ from backend.research.funding_study import (  # noqa: E402
 from backend.research.portfolio_study import (  # noqa: E402
     equal_weights,
     funding_weights,
+    return_on_capital,
     simulate_portfolio,
     top_n_assets,
+    walk_forward,
 )
 
 ROUND_TRIP_FEE_BPS = 18.6  # 2×(spot 7.5 + perp 1.8) — maker z rabatem BNB
+TAKER_FEE_BPS = 30.0       # scenariusz pesymistyczny: taker bez rabatu
+PERP_LEVERAGE = 3.0        # do przeliczenia zwrotu z nominału na kapitał
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -44,7 +49,7 @@ def main() -> None:
     for asset in ASSETS:
         symbol = BINANCE_SYMBOL[asset]
         try:
-            history = fetch_funding_history_paged(symbol, pages=4)
+            history = fetch_funding_history_paged(symbol, pages=6)   # ~400 dni (pełny rok)
         except Exception as exc:  # noqa: BLE001
             print(f"{asset.value}: blad sieci: {exc}")
             continue
@@ -53,6 +58,7 @@ def main() -> None:
         rows.append({
             "asset": asset.value,
             "stats": analyze_funding(rates),
+            "gaps": count_funding_gaps(history),
             "always": simulate_carry_always_in(rates, ROUND_TRIP_FEE_BPS),
             "pos": simulate_carry_positive_only(rates, ROUND_TRIP_FEE_BPS),
             "smooth": simulate_carry_smoothed(rates, ROUND_TRIP_FEE_BPS),
@@ -95,9 +101,10 @@ def main() -> None:
 
 
 def _portfolio_section(rows: list[dict], rates_by_asset: dict[str, list[float]]) -> str:
-    """Werdykt Tier A: równe wagi vs top-N vs ważenie funding, z ryzykiem (maxDD,
-    Calmar). Wagi liczy PRODUKCYJNA funkcja bota (FundingWeightedSizer.weight) —
-    badanie i egzekucja są spójne z definicji."""
+    """Werdykt Tier A z rygorem: alokacja vs zwrot i ryzyko (maxDD, Calmar), zwrot
+    na KAPITALE (nie nominale), wrażliwość na fee (maker vs taker), jakość danych
+    (luki), oraz walk-forward OUT-OF-SAMPLE (selekcja bez look-ahead). Wagi liczy
+    PRODUKCYJNA funkcja bota (FundingWeightedSizer.weight)."""
     traded = [r["asset"] for r in rows if r["stats"].annualized_pct > 0]
     if len(traded) < 2:
         return ""
@@ -105,29 +112,58 @@ def _portfolio_section(rows: list[dict], rates_by_asset: dict[str, list[float]])
     smooth_pct = {r["asset"]: r["smooth"].annualized_net_pct for r in rows if r["asset"] in traded}
     top4 = top_n_assets(smooth_pct, min(4, len(traded)))
 
-    variants = [
-        ("rowne wagi (wszystkie dodatnie)", equal_weights(traded)),
-        ("rowne wagi top-4 po carry", equal_weights(top4)),
-        ("wazone funding (wszystkie)", funding_weights(mean_bps)),
-        ("wazone funding top-4", funding_weights({k: mean_bps[k] for k in top4})),
-    ]
-    header = f"{'wariant':32} {'zwrot/rok':>10} {'maxDD':>7} {'Calmar':>7}  sklad"
-    out = ["PORTFEL TIER A — alokacja vs zwrot i ryzyko (polityka smoothed):",
-           header, "-" * len(header)]
-    for label, weights in variants:
-        try:
-            res = simulate_portfolio(rates_by_asset, weights,
-                                     round_trip_fee_bps=ROUND_TRIP_FEE_BPS, label=label)
-        except ValueError as exc:
-            out.append(f"{label:32} pominieto ({exc})")
-            continue
-        calmar = f"{res.calmar:6.1f}" if res.calmar is not None else "   inf"
-        skład = " ".join(f"{k}:{w:.0%}" for k, w in sorted(res.weights.items(), key=lambda kv: -kv[1]))
-        out.append(f"{label:32} {res.annualized_net_pct:9.2f}% {res.max_drawdown_pct:6.2f}% "
-                   f"{calmar}  {skład}")
+    out = ["PORTFEL TIER A — alokacja vs zwrot i ryzyko (polityka smoothed):"]
+
+    # jakość danych — cienki edge nie znosi luk w rozliczeniach
+    bad = [(r["asset"], r["gaps"]) for r in rows
+           if r.get("gaps") and (r["gaps"]["missing_settlements"] or r["gaps"]["irregular_gaps"])]
+    if bad:
+        out.append("  ⚠ jakość danych: " + ", ".join(
+            f"{a} (brak {g['missing_settlements']}, nieregularne {g['irregular_gaps']})" for a, g in bad))
+    else:
+        out.append("  ✓ jakość danych: brak luk w rozliczeniach funding")
+
+    # wrażliwość na fee: maker (z rabatem BNB) vs taker (pesymistycznie)
+    for fee_label, fee in (("maker", ROUND_TRIP_FEE_BPS), ("taker", TAKER_FEE_BPS)):
+        header = f"  [{fee_label} {fee:.0f}bps] {'wariant':26} {'zwrot/nom':>9} {'na kap':>7} {'maxDD':>7} {'Calmar':>7}  sklad"
+        out += ["", header, "  " + "-" * (len(header) - 2)]
+        variants = [
+            ("rowne wagi (wszystkie)", equal_weights(traded)),
+            ("rowne wagi top-4", equal_weights(top4)),
+            ("wazone funding (wszystkie)", funding_weights(mean_bps)),
+            ("wazone funding top-4", funding_weights({k: mean_bps[k] for k in top4})),
+        ]
+        for label, weights in variants:
+            try:
+                res = simulate_portfolio(rates_by_asset, weights, round_trip_fee_bps=fee, label=label)
+            except ValueError as exc:
+                out.append(f"  [{fee_label}] {label:26} pominieto ({exc})")
+                continue
+            calmar = f"{res.calmar:6.1f}" if res.calmar is not None else "   inf"
+            roc = return_on_capital(res.annualized_net_pct, PERP_LEVERAGE)
+            skład = " ".join(f"{k}:{w:.0%}" for k, w in sorted(res.weights.items(), key=lambda kv: -kv[1]))
+            out.append(f"  [{fee_label} {fee:.0f}bps] {label:26} {res.annualized_net_pct:8.2f}% "
+                       f"{roc:6.2f}% {res.max_drawdown_pct:6.2f}% {calmar}  {skład}")
+
+    # walk-forward OOS — najuczciwsza liczba (selekcja na treningu, wynik na teście)
     out.append("")
-    out.append("Roznica 'wazone' vs 'rowne wagi' = zmierzony (nie obiecany) efekt Tier A.")
-    out.append("Dopiero TE liczby wolno wpisac jako nowy target zwrotu.")
+    try:
+        n_common = min(len(rates_by_asset[a]) for a in traded)
+        train = max(150, n_common // 3)
+        test = max(50, n_common // 6)
+        wf = walk_forward(rates_by_asset, train=train, test=test, top_n=min(4, len(traded)),
+                          funding_weighted=True, round_trip_fee_bps=ROUND_TRIP_FEE_BPS)
+        roc_wf = return_on_capital(wf.annualized_net_pct, PERP_LEVERAGE)
+        out.append(f"  WALK-FORWARD (out-of-sample, train={train}/test={test}, {len(wf.windows)} okien): "
+                   f"{wf.annualized_net_pct:+.2f}%/rok na nominale, {roc_wf:+.2f}%/rok na kapitale")
+        out.append("  ↑ to jest liczba bez look-ahead — selekcja top-4/wagi wybierana TYLKO na przeszłości.")
+    except ValueError as exc:
+        out.append(f"  walk-forward pominieto: {exc}")
+
+    out += ["",
+            "Roznica 'wazone' vs 'rowne wagi' = zmierzony efekt Tier A. 'na kap' = zwrot na",
+            f"Twoim kapitale przy {PERP_LEVERAGE:.0f}x (nominal + depozyt). Do targetu bierz",
+            "WALK-FORWARD na kapitale — reszta jest in-sample (optymistyczna)."]
     return "\n".join(out)
 
 

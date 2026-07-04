@@ -7,9 +7,11 @@ from backend.research.portfolio_study import (
     equal_weights,
     funding_weights,
     normalize_weights,
+    return_on_capital,
     simulate_portfolio,
     smoothed_equity_curve,
     top_n_assets,
+    walk_forward,
 )
 
 FEE = 18.6
@@ -122,3 +124,57 @@ def test_weights_are_normalized_in_result():
                              {"A": 3.0, "B": 1.0})
     assert abs(res.weights["A"] - 0.75) < 1e-12
     assert abs(sum(res.weights.values()) - 1.0) < 1e-12
+
+
+# -- zwrot na kapitale (nie nominale) --------------------------------------- #
+def test_return_on_capital_applies_leverage_factor():
+    # kapitał = nominał(1+1/lev); ROC = zwrot_nom × lev/(lev+1)
+    assert abs(return_on_capital(18.0, 3.0) - 13.5) < 1e-9    # ×0.75
+    assert abs(return_on_capital(20.0, 4.0) - 16.0) < 1e-9    # ×0.80
+    assert abs(return_on_capital(20.0, 1.0) - 10.0) < 1e-9    # ×0.50
+
+
+def test_return_on_capital_zero_leverage_safe():
+    assert return_on_capital(18.0, 0.0) == 0.0
+
+
+# -- walk-forward: selekcja out-of-sample ----------------------------------- #
+def test_walk_forward_selects_on_train_measures_on_test():
+    rates = {"LOW": _const(0.0001, 900), "HIGH": _const(0.0003, 900)}
+    wf = walk_forward(rates, train=300, test=150, top_n=1, round_trip_fee_bps=FEE)
+    # top-1 na treningu MUSI wskazać HIGH (wyższy średni funding) w każdym oknie
+    assert wf.windows
+    for w in wf.windows:
+        assert set(w.weights) == {"HIGH"}
+    assert wf.n_test_periods == len(wf.windows) * 150
+
+
+def test_walk_forward_annualized_positive_for_positive_regime():
+    wf = walk_forward({"A": _const(0.0002, 900), "B": _const(0.00025, 900)},
+                      train=300, test=300, round_trip_fee_bps=FEE)
+    assert wf.annualized_net_pct > 0
+
+
+def test_walk_forward_no_positive_asset_means_no_trade_window():
+    # trening widzi tylko ujemny funding → okno nie handluje (wkład 0, uczciwie liczone)
+    wf = walk_forward({"A": _const(-0.0002, 600)}, train=300, test=150, round_trip_fee_bps=FEE)
+    assert all(w.weights == {} for w in wf.windows)
+    assert wf.total_net_bps == 0.0
+    assert wf.n_test_periods > 0                 # czas liczony mimo braku handlu
+
+
+def test_walk_forward_raises_when_history_too_short():
+    import pytest as _pytest
+    with _pytest.raises(ValueError):
+        walk_forward({"A": _const(0.0002, 100)}, train=300, test=150)
+
+
+def test_walk_forward_out_of_sample_not_wildly_above_in_sample():
+    # na stacjonarnym reżimie OOS ≈ in-sample (selekcja to nie szczęście).
+    rng_rates = {"BTC": _const(0.0001, 1200), "DOGE": _const(0.00028, 1200),
+                 "XRP": _const(0.00023, 1200)}
+    wf = walk_forward(rng_rates, train=300, test=150, top_n=2, round_trip_fee_bps=FEE)
+    ins = simulate_portfolio(rng_rates, funding_weights(
+        {"BTC": 1.0, "DOGE": 2.8, "XRP": 2.3}), round_trip_fee_bps=FEE)
+    # OOS nie może być RAŻĄCO wyższy niż in-sample (to byłby sygnał błędu/look-ahead)
+    assert wf.annualized_net_pct <= ins.annualized_net_pct * 1.2 + 1.0
