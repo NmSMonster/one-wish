@@ -9,7 +9,7 @@
 
 One Wish to **realny bot tradingowy**: delta-neutral **basis/funding carry** na
 Binance (long spot + short perp, inkasowanie funding). Backend Python, event-driven,
-**296 testów pytest zielonych**. Edge (carry) **zwalidowany na ~roku realnej historii
+**303 testy pytest zielone**. Edge (carry) **zwalidowany na ~roku realnej historii
 funding (~+18%/rok delta-neutral po prowizjach)**. Bot poprawnie wchodzi w carry na
 realnych danych. Realny handel jest **domyślnie zablokowany** — jesteśmy w fazie
 paper/walidacji, przed transportem na testnecie i pilotem.
@@ -29,7 +29,7 @@ Folder roboczy: katalog repo (na GitHubie). Testy: `python -m pytest -q`.
   prowizje — naprawione).
 - **Tryb „dislocation"** (opcjonalny, do badań): wejście na perp-rich spike.
 
-## 2. Status — co działa (296 testów zielonych)
+## 2. Status — co działa (303 testy zielone)
 
 Pełny pipeline event-driven (`backend/`):
 
@@ -106,7 +106,7 @@ backend/
                liquidation_risk (ryzyko likwidacji altów z cen)
 scripts/       study_funding, run_backtest, run_edge_validation, run_paper_live,
                record_market, record_liquidations, scan_universe, run_testnet_smoke
-tests/         pełna suita pytest (296)
+tests/         pełna suita pytest (303)
 Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md,
                CARRY_VERDICT.md, UNIVERSE_SCAN.md, DATA_CONTRACT.md, RUNBOOK.md, ten HANDOFF.md
 ```
@@ -114,7 +114,7 @@ Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md
 ## 6. Jak uruchomić
 
 ```
-python -m pytest -q                              # 296 testów
+python -m pytest -q                              # 303 testy
 python scripts/study_funding.py                  # werdykt carry na historii funding (natychmiast)
 python scripts/scan_universe.py --top 25         # ranking aktywów po carry
 python scripts/run_backtest.py                   # backtest carry vs scalp (synthetic)
@@ -269,6 +269,19 @@ Z przeglądów Codexa „survive live" — zrobione: P0 OrderManager, #4 kwantyz
   `python scripts/study_alt_risk.py` na maszynie z Binance → pokaże, czy VELVET/TAC/HYPE
   kiedykolwiek by zlikwidowały short. DOPIERO to (razem z 16% funding) mówi, czy i jaką
   dźwignią wolno wejść w alty.**
+
+- ✅ **Tier A #7: KOREKTA ryzyka — isolated vs cross margin** (`DeltaNeutralCrossStress`
+  w risk/margin.py). Realny werdykt `study_alt_risk.py` pokazał, że VELVET/TAC robiły
+  historycznie **+147%/+287%** — w ISOLATED margin to pewna likwidacja shorta. ALE to
+  był błędny (najgorszy) tryb: w delta-neutral z **CROSS/portfolio margin zysk na nodze
+  LONG SPOT jest collateralem dla perpa**, więc czysty ruch kierunkowy NIE likwiduje.
+  Smoke na realnych ruchach: isolated 3x → XRP/ZEC/VELVET/TAC LIKW; **cross → WSZYSTKIE
+  przeżywają**, z buforem basis +85-117% (perp musiałby wystrzelić >85% PONAD spot, by
+  zlikwidować — ekstremalny squeeze). **Skorygowany wniosek: ~16% z altów JEST bezpiecznie
+  zbieralne, ale WYMAGA cross/portfolio margin (nie isolated!).** Realne pozostałe ryzyka
+  (których cross nie usuwa): płynność wyjścia przy pumpie, flip funding, depeg/venue,
+  rozjazd basis ponad bufor. study_alt_risk pokazuje teraz kolumny isolated LIKW + cross
+  przeżywa + bufor-basis. Naprawiony też błąd „najg.1bar 0.0%" (intra-bar high/open).
 
 **Zostało (buildable-now):**
 

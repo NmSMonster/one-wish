@@ -143,6 +143,56 @@ def _build_default_maintenance() -> dict:
 DEFAULT_MAINTENANCE_BY_ASSET = _build_default_maintenance()
 
 
+@dataclass
+class DeltaNeutralCrossStress:
+    """Przeżywalność pary delta-neutral (long spot + short perp) w CROSS/portfolio
+    margin pod gwałtownym ruchem CENY. KLUCZOWE rozróżnienie od isolated:
+
+    - isolated short: likwiduje się przy ruchu ceny w górę ~1/dźwignia (3x → +31%),
+      niezależnie od nogi spot — bo depozyt perpa jest odseparowany;
+    - cross/portfolio margin: zysk na nodze LONG SPOT jest collateralem dla perpa,
+      więc czysty ruch KIERUNKOWY (spot i perp rosną tak samo) NIE likwiduje — spot
+      pokrywa stratę perpa. Tak prowadzi się delta-neutral na zmiennych altach
+      (VELVET/TAC potrafią +146/+287% — isolated = pewna śmierć, cross przeżywa).
+
+    Realnym zabójcą w cross-marginie jest ROZJAZD BASIS (`basis_stress`: o ile perp
+    rośnie BARDZIEJ niż spot, np. short-squeeze pcha premię perpa) oraz HAIRCUT na
+    spot-collateral. Nominał znormalizowany (N=1)."""
+    perp_leverage: float = 3.0
+    maintenance_margin_rate: float = 0.02
+    spot_haircut: float = 0.10        # ile % wartości spotu NIE liczy się jako collateral
+
+    def equity_ratio(self, up_frac: float, basis_stress: float = 0.0) -> float:
+        """equity / maintenance po ruchu ceny spot o `up_frac` (perp o up_frac+basis_stress).
+        ≥ 1 = przeżywa. Zysk spotu (z haircutem) + depozyt perpa − strata perpa,
+        podzielone przez maintenance perpa na powiększonym nominale."""
+        spot_collateral = (1.0 + up_frac) * (1.0 - self.spot_haircut)
+        futures_equity = 1.0 / self.perp_leverage - (up_frac + basis_stress)
+        equity = spot_collateral + futures_equity
+        maintenance = (1.0 + up_frac + basis_stress) * self.maintenance_margin_rate
+        if maintenance <= 0:
+            return math.inf
+        return equity / maintenance
+
+    def survives(self, up_frac: float, basis_stress: float = 0.0) -> bool:
+        return self.equity_ratio(up_frac, basis_stress) >= 1.0
+
+    def max_basis_stress(self, up_frac: float, hi: float = 10.0) -> float:
+        """Maks. rozjazd basis (perp ponad spot), przy którym para JESZCZE przeżywa
+        dany ruch ceny. 0 = nie przeżywa nawet bez rozjazdu; wysoka wartość = duży
+        bufor. Bisekcja."""
+        if not self.survives(up_frac, 0.0):
+            return 0.0
+        lo, hi = 0.0, hi
+        for _ in range(50):
+            mid = (lo + hi) / 2
+            if self.survives(up_frac, mid):
+                lo = mid
+            else:
+                hi = mid
+        return lo
+
+
 class MarginStressTester:
     """Stress-test marginu nogi short-perp: co stanie się ze zdrowiem przy
     niekorzystnym ruchu perpa w górę o +10/20/30% (short traci na wzroście).

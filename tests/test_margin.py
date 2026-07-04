@@ -169,3 +169,43 @@ def test_stress_empty_book_is_safe():
     assert rep["positions"] == {}
     assert rep["summary"]["safe"] is True
     assert rep["summary"]["min_health"] == float("inf")
+
+
+# -- cross-margin delta-neutral: przeżywalność vs isolated ------------------- #
+from backend.risk.margin import DeltaNeutralCrossStress  # noqa: E402
+
+
+def test_cross_survives_huge_move_isolated_would_not():
+    # +146% (jak VELVET): isolated short 3x (próg +31%) = pewna likwidacja;
+    # cross (spot pokrywa perp) = przeżywa
+    cross = DeltaNeutralCrossStress(perp_leverage=3.0, maintenance_margin_rate=0.02, spot_haircut=0.10)
+    assert cross.survives(1.466) is True
+    assert cross.equity_ratio(1.466) > 1.0
+
+
+def test_cross_survives_pure_directional_regardless_of_size():
+    cross = DeltaNeutralCrossStress(perp_leverage=3.0, spot_haircut=0.10)
+    # bez rozjazdu basis nawet +500% przeżywa (spot rośnie razem z perpem)
+    assert cross.survives(5.0, basis_stress=0.0) is True
+
+
+def test_cross_liquidates_on_extreme_basis_divergence():
+    # realnym zabójcą jest basis: perp znacznie ponad spot. Bez haircut-buforu
+    # dostatecznie duży rozjazd łamie nawet cross.
+    cross = DeltaNeutralCrossStress(perp_leverage=3.0, maintenance_margin_rate=0.02, spot_haircut=0.10)
+    assert cross.survives(0.5, basis_stress=0.0) is True
+    assert cross.survives(0.5, basis_stress=5.0) is False    # perp +500% ponad spot → śmierć
+
+
+def test_max_basis_stress_positive_when_survivable():
+    cross = DeltaNeutralCrossStress(perp_leverage=3.0, spot_haircut=0.10)
+    buf = cross.max_basis_stress(1.0)
+    assert buf > 0                                            # jest zapas na squeeze
+    assert cross.survives(1.0, buf - 0.05)
+    assert not cross.survives(1.0, buf + 0.5)
+
+
+def test_higher_haircut_reduces_survivability():
+    lo = DeltaNeutralCrossStress(perp_leverage=3.0, spot_haircut=0.05)
+    hi = DeltaNeutralCrossStress(perp_leverage=3.0, spot_haircut=0.50)
+    assert lo.max_basis_stress(1.0) > hi.max_basis_stress(1.0)

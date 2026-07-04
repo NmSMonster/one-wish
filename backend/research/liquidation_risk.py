@@ -38,24 +38,36 @@ def max_run_up(prices: list[float], window: int) -> float:
     return worst
 
 
+def worst_intrabar_up(highs: list[float], opens: list[float]) -> float:
+    """Największy skok WEWNĄTRZ pojedynczego bara: high/open − 1. To ryzyko gapu/
+    świecowego wystrzału (short może dostać margin call w minuty, nie w dni)."""
+    worst = 0.0
+    for h, o in zip(highs, opens):
+        if o > 0:
+            worst = max(worst, h / o - 1.0)
+    return worst
+
+
 @dataclass
 class LiquidationAssessment:
     symbol: str
     n_bars: int
     interval: str
-    worst_1bar_up: float             # najgorszy ruch w górę w 1 barze (frakcja)
+    worst_1bar_up: float             # największy skok wewnątrz jednego bara (high/open−1)
     worst_window_up: float           # najgorszy ruch w górę w oknie reakcji (frakcja)
     window: int
-    breaches: dict                   # dźwignia -> czy historyczny ruch przekroczył próg likwidacji
+    breaches: dict                   # dźwignia -> czy historyczny ruch przekroczył próg likwidacji (isolated)
 
 
-def assess_short_liquidation(highs: list[float], *, interval: str = "1d", window: int = 3,
+def assess_short_liquidation(highs: list[float], opens: list[float] | None = None, *,
+                             interval: str = "1d", window: int = 3,
                              leverages: tuple[float, ...] = (3.0, 4.0, 5.0),
                              mmr: float = 0.02, symbol: str = "") -> LiquidationAssessment:
-    """Ocena: czy realna historia CEN (highs) zlikwidowałaby short przy danych
-    dźwigniach. `window` = ile barów zajęłaby reakcja/domknięcie (konserwatywnie ≥1).
-    Zwraca najgorsze ruchy w górę i, per dźwignia, czy przekroczyły próg likwidacji."""
-    w1 = max_run_up(highs, 0)          # w obrębie sąsiednich barów (1-bar skok)
+    """Ocena (ISOLATED margin — najgorszy przypadek): czy realna historia CEN
+    zlikwidowałaby short przy danych dźwigniach. `window` = ile barów zajęłaby
+    reakcja/domknięcie (konserwatywnie ≥1). `breaches` dotyczy isolated; w cross/
+    portfolio margin spot pokrywa perp — patrz `DeltaNeutralCrossStress`."""
+    w1 = worst_intrabar_up(highs, opens) if opens else 0.0
     ww = max_run_up(highs, window)
     breaches = {}
     for lev in leverages:

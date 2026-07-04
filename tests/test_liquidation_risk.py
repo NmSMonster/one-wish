@@ -51,3 +51,16 @@ def test_assess_reports_metadata():
     a = assess_short_liquidation([100, 110, 105], window=1, symbol="VELVETUSDT")
     assert a.symbol == "VELVETUSDT"
     assert a.n_bars == 3
+
+
+def test_intrabar_up_from_opens():
+    # bar 2: open 100, high 130 → +30% wewnątrz bara
+    highs = [100, 130, 105]
+    opens = [99, 100, 104]
+    a = assess_short_liquidation(highs, opens, window=1)
+    assert abs(a.worst_1bar_up - 0.30) < 1e-9
+
+
+def test_worst_1bar_zero_without_opens():
+    a = assess_short_liquidation([100, 130, 105], window=1)   # brak opens
+    assert a.worst_1bar_up == 0.0
