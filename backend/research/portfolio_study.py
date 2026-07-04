@@ -122,10 +122,13 @@ def _drawdown(curve: list[float]) -> float:
 
 def simulate_portfolio(rates_by_asset: dict[str, list[float]], weights: dict[str, float],
                        *, round_trip_fee_bps: float = 18.6, window: int = 9,
+                       settle_per_year: float = _SETTLE_PER_YEAR,
                        label: str = "portfolio") -> PortfolioResult:
     """Portfel = ważona kombinacja krzywych smoothed-carry per aktywo (wagi statyczne
     — carry-hold nie rebalansuje). Zwraca zwrot, drawdown, Calmar i najgorsze
-    pojedyncze rozliczenie."""
+    pojedyncze rozliczenie. `settle_per_year` MUSI odpowiadać interwałowi funding
+    aktywów (8h→3×365, 4h→6×365) — inaczej annualizacja jest błędna. Mieszaj tylko
+    aktywa o TYM SAMYM interwale."""
     weights = normalize_weights(weights)
     aligned = align_tail({k: v for k, v in rates_by_asset.items() if k in weights})
     missing = set(weights) - set(aligned)
@@ -141,7 +144,7 @@ def simulate_portfolio(rates_by_asset: dict[str, list[float]], weights: dict[str
     final = portfolio[-1]
     per_settlement = [portfolio[0]] + [portfolio[t] - portfolio[t - 1] for t in range(1, n)]
     max_dd_bps = _drawdown(portfolio)
-    years = n / _SETTLE_PER_YEAR
+    years = n / settle_per_year
     annualized = (final / 100.0) / years if years > 0 else 0.0
     max_dd_pct = max_dd_bps / 100.0
     calmar = (annualized / max_dd_pct) if max_dd_pct > 0 else None
@@ -189,17 +192,19 @@ class WalkForwardResult:
     windows: list[WalkForwardWindow] = field(default_factory=list)
     total_net_bps: float = 0.0
     n_test_periods: int = 0
+    settle_per_year: float = _SETTLE_PER_YEAR
 
     @property
     def annualized_net_pct(self) -> float:
-        years = self.n_test_periods / _SETTLE_PER_YEAR
+        years = self.n_test_periods / self.settle_per_year
         return (self.total_net_bps / 100.0) / years if years > 0 else 0.0
 
 
 def walk_forward(rates_by_asset: dict[str, list[float]], *, train: int, test: int,
                  round_trip_fee_bps: float = 18.6, window: int = 9,
                  top_n: int | None = None, funding_weighted: bool = True,
-                 ref_funding_bps: float = 1.5, label: str = "walk-forward") -> WalkForwardResult:
+                 ref_funding_bps: float = 1.5, settle_per_year: float = _SETTLE_PER_YEAR,
+                 label: str = "walk-forward") -> WalkForwardResult:
     """Uczciwa (out-of-sample) wersja werdyktu portfelowego: skład i wagi wybierane
     WYŁĄCZNIE na oknie treningowym (`train` rozliczeń), wynik mierzony na NASTĘPNYM
     oknie (`test` rozliczeń), okno przesuwa się o `test`. Eliminuje look-ahead bias
@@ -216,7 +221,7 @@ def walk_forward(rates_by_asset: dict[str, list[float]], *, train: int, test: in
     if n < train + test:
         raise ValueError(f"historia za krótka: {n} < train+test = {train + test}")
 
-    result = WalkForwardResult(label=label, train=train, test=test)
+    result = WalkForwardResult(label=label, train=train, test=test, settle_per_year=settle_per_year)
     for start in range(train, n - test + 1, test):
         train_slices = {k: v[start - train:start] for k, v in aligned.items()}
         test_slices = {k: v[start:start + test] for k, v in aligned.items()}
@@ -234,8 +239,8 @@ def walk_forward(rates_by_asset: dict[str, list[float]], *, train: int, test: in
 
         weights = (funding_weights(candidates, ref_funding_bps=ref_funding_bps)
                    if funding_weighted else equal_weights(list(candidates)))
-        res = simulate_portfolio(test_slices, weights,
-                                 round_trip_fee_bps=round_trip_fee_bps, window=window)
+        res = simulate_portfolio(test_slices, weights, round_trip_fee_bps=round_trip_fee_bps,
+                                 window=window, settle_per_year=settle_per_year)
         result.windows.append(WalkForwardWindow(start - train, start, start + test,
                                                 res.weights, res.final_net_bps,
                                                 res.annualized_net_pct))

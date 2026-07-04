@@ -9,7 +9,7 @@
 
 One Wish to **realny bot tradingowy**: delta-neutral **basis/funding carry** na
 Binance (long spot + short perp, inkasowanie funding). Backend Python, event-driven,
-**281 testów pytest zielonych**. Edge (carry) **zwalidowany na ~roku realnej historii
+**284 testy pytest zielone**. Edge (carry) **zwalidowany na ~roku realnej historii
 funding (~+18%/rok delta-neutral po prowizjach)**. Bot poprawnie wchodzi w carry na
 realnych danych. Realny handel jest **domyślnie zablokowany** — jesteśmy w fazie
 paper/walidacji, przed transportem na testnecie i pilotem.
@@ -29,7 +29,7 @@ Folder roboczy: katalog repo (na GitHubie). Testy: `python -m pytest -q`.
   prowizje — naprawione).
 - **Tryb „dislocation"** (opcjonalny, do badań): wejście na perp-rich spike.
 
-## 2. Status — co działa (281 testów zielonych)
+## 2. Status — co działa (284 testy zielone)
 
 Pełny pipeline event-driven (`backend/`):
 
@@ -105,7 +105,7 @@ backend/
                universe (ranking aktywów), recorder (zapis ticków)
 scripts/       study_funding, run_backtest, run_edge_validation, run_paper_live,
                record_market, record_liquidations, scan_universe, run_testnet_smoke
-tests/         pełna suita pytest (281)
+tests/         pełna suita pytest (284)
 Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md,
                CARRY_VERDICT.md, UNIVERSE_SCAN.md, DATA_CONTRACT.md, RUNBOOK.md, ten HANDOFF.md
 ```
@@ -113,7 +113,7 @@ Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md
 ## 6. Jak uruchomić
 
 ```
-python -m pytest -q                              # 281 testów
+python -m pytest -q                              # 284 testy
 python scripts/study_funding.py                  # werdykt carry na historii funding (natychmiast)
 python scripts/scan_universe.py --top 25         # ranking aktywów po carry
 python scripts/run_backtest.py                   # backtest carry vs scalp (synthetic)
@@ -240,6 +240,20 @@ Z przeglądów Codexa „survive live" — zrobione: P0 OrderManager, #4 kwantyz
   zwrot jest w wysoko-funding altach 4h/1h (~29-35%), NIE w majorsach (~5-7%) — ale
   te alty są nowsze/ryzykowniejsze (wysoki funding = zapłata za ryzyko). To realne
   dane wskazujące gdzie jest zysk.** Re-run study_funding da poprawiony CARRY_VERDICT.md.
+- ⚠️ **KLUCZOWE ODKRYCIE (realny werdykt 2026-07-04 po fixie): 8h-majorsy OOS ≈ 0%.**
+  Walk-forward na kapitale dla majorsów (BTC/ETH/SOL/XRP/DOGE) = **+0.38%/rok** przy
+  drawdownie 3.4-7.3%. Nasze „~18%" było IN-SAMPLE z gorętszego reżimu — funding
+  ostygł, a walk-forward to obnażył. Bezpieczny carry na majorsach TERAZ się nie
+  opłaca. Realny zwrot jest tylko w altach 4h: VELVET ~29.5%, TAC ~29% (per-aktywo),
+  ale to nowe/ryzykowne kontrakty i NIE były jeszcze walidowane OOS.
+- ✅ **Tier A #5: walk-forward dla altów o niestandardowym interwale** — `simulate_
+  portfolio` i `walk_forward` przyjmują `settle_per_year` (domyślnie 3×365 = zero
+  regresji); study_funding grupuje aktywa non-8h po interwale i liczy walk-forward
+  OSOBNO per grupa z poprawnym settle_per_year (mieszać wolno tylko ten sam interwał).
+  Cel: sprawdzić, czy 29% VELVET/TAC trzyma się OUT-OF-SAMPLE, czy to in-sample miraż
+  jak „18%" na majorsach. **NASTĘPNY KROK: właściciel odpala re-run study_funding →
+  wiersz „WALK-FORWARD alty 4h" pokaże uczciwą liczbę OOS altów. Dopiero ona decyduje,
+  czy wchodzić w te alty.** (Bez tego wchodzenie = powtórzenie błędu z majorsami.)
 
 **Zostało (buildable-now):**
 

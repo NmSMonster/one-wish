@@ -182,11 +182,37 @@ def _portfolio_section(rows: list[dict], rates_by_asset: dict[str, list[float]])
         wf = walk_forward(std_rates, train=train, test=test, top_n=min(4, len(traded)),
                           funding_weighted=True, round_trip_fee_bps=ROUND_TRIP_FEE_BPS)
         roc_wf = return_on_capital(wf.annualized_net_pct, PERP_LEVERAGE)
-        out.append(f"  WALK-FORWARD (out-of-sample, train={train}/test={test}, {len(wf.windows)} okien): "
-                   f"{wf.annualized_net_pct:+.2f}%/rok na nominale, {roc_wf:+.2f}%/rok na kapitale")
-        out.append("  ↑ to jest liczba bez look-ahead — selekcja top-4/wagi wybierana TYLKO na przeszłości.")
+        out.append(f"  WALK-FORWARD 8h-majorsy (out-of-sample, train={train}/test={test}, "
+                   f"{len(wf.windows)} okien): {wf.annualized_net_pct:+.2f}%/rok nominał, "
+                   f"{roc_wf:+.2f}%/rok kapitał")
+        out.append("  ↑ liczba bez look-ahead — selekcja top-4/wagi TYLKO na przeszłości.")
     except ValueError as exc:
-        out.append(f"  walk-forward pominieto: {exc}")
+        out.append(f"  walk-forward majorsy pominieto: {exc}")
+
+    # WALK-FORWARD dla altów o niestandardowym interwale — grupujemy po interwale
+    # (mieszać wolno tylko aktywa o tym samym interwale) i liczymy OSOBNO z poprawnym
+    # settle_per_year. To weryfikuje, czy 29% VELVET/TAC trzyma się OUT-OF-SAMPLE,
+    # czy to in-sample miraż (jak ~18% na majorsach przed walk-forwardem).
+    groups: dict[float, list] = {}
+    for r in non_standard:
+        if r["stats"].annualized_pct > 0:
+            groups.setdefault(round(r["interval"]["interval_hours"], 1), []).append(r)
+    for iv_h, grp in sorted(groups.items()):
+        names = [r["asset"] for r in grp]
+        grp_rates = {r["asset"]: rates_by_asset[r["asset"]] for r in grp}
+        spy = grp[0]["interval"]["settle_per_year"]
+        try:
+            nc = min(len(v) for v in grp_rates.values())
+            tr, te = max(150, nc // 3), max(50, nc // 6)
+            wf_alt = walk_forward(grp_rates, train=tr, test=te, top_n=min(4, len(names)),
+                                  funding_weighted=True, round_trip_fee_bps=ROUND_TRIP_FEE_BPS,
+                                  settle_per_year=spy)
+            roc_alt = return_on_capital(wf_alt.annualized_net_pct, PERP_LEVERAGE)
+            out.append(f"  WALK-FORWARD alty {iv_h:.0f}h ({', '.join(names)}, train={tr}/test={te}, "
+                       f"{len(wf_alt.windows)} okien): {wf_alt.annualized_net_pct:+.2f}%/rok nominał, "
+                       f"{roc_alt:+.2f}%/rok kapitał")
+        except ValueError as exc:
+            out.append(f"  walk-forward alty {iv_h:.0f}h pominieto: {exc}")
 
     out += ["",
             "Roznica 'wazone' vs 'rowne wagi' = zmierzony efekt Tier A. 'na kap' = zwrot na",

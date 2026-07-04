@@ -178,3 +178,26 @@ def test_walk_forward_out_of_sample_not_wildly_above_in_sample():
         {"BTC": 1.0, "DOGE": 2.8, "XRP": 2.3}), round_trip_fee_bps=FEE)
     # OOS nie może być RAŻĄCO wyższy niż in-sample (to byłby sygnał błędu/look-ahead)
     assert wf.annualized_net_pct <= ins.annualized_net_pct * 1.2 + 1.0
+
+
+# -- settle_per_year: poprawna annualizacja portfela/WF dla altów 4h --------- #
+def test_simulate_portfolio_annualization_scales_with_settle_per_year():
+    rates = {"A": _const(0.0002, 600)}
+    p8 = simulate_portfolio(rates, {"A": 1.0}, round_trip_fee_bps=FEE)
+    p4 = simulate_portfolio(rates, {"A": 1.0}, round_trip_fee_bps=FEE, settle_per_year=6 * 365)
+    # ten sam per-period wynik, 4h = 2× więcej rozliczeń/rok → 2× wyższy roczny
+    assert abs(p4.annualized_net_pct - 2 * p8.annualized_net_pct) < 1e-6
+
+
+def test_walk_forward_uses_settle_per_year_for_annualization():
+    rates = {"A": _const(0.00025, 900), "B": _const(0.0002, 900)}
+    wf8 = walk_forward(rates, train=300, test=300, round_trip_fee_bps=FEE)
+    wf4 = walk_forward(rates, train=300, test=300, round_trip_fee_bps=FEE, settle_per_year=6 * 365)
+    assert wf4.annualized_net_pct > wf8.annualized_net_pct
+    assert wf4.settle_per_year == 6 * 365
+
+
+def test_walk_forward_default_settle_per_year_unchanged():
+    # brak podania settle_per_year = stare zachowanie (8h)
+    wf = walk_forward({"A": _const(0.0002, 600)}, train=300, test=150, round_trip_fee_bps=FEE)
+    assert abs(wf.settle_per_year - 3 * 365) < 1e-9
