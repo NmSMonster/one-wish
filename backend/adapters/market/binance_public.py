@@ -53,6 +53,23 @@ def fetch_funding_history(symbol: str, limit: int = 100, timeout: float = 8.0) -
     return _http_get_json(FUT_BASE + f"/fapi/v1/fundingRate?symbol={symbol}&limit={limit}", timeout)
 
 
+def fetch_klines(symbol: str, interval: str = "1d", limit: int = 1000,
+                 timeout: float = 8.0) -> list[dict]:
+    """Historia świec perp (USDT-M) z /fapi/v1/klines — potrzebna do OCENY RYZYKA
+    likwidacji (funding-study widzi nagrodę, ale nie ruch ceny, który likwiduje short).
+    Zwraca listę {ts, open, high, low, close} chronologicznie."""
+    raw = _http_get_json(
+        FUT_BASE + f"/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}", timeout)
+    out = []
+    for k in raw:
+        try:
+            out.append({"ts": int(k[0]) / 1000.0, "open": float(k[1]), "high": float(k[2]),
+                        "low": float(k[3]), "close": float(k[4])})
+        except (IndexError, TypeError, ValueError):
+            continue
+    return out
+
+
 def fetch_funding_history_paged(symbol: str, pages: int = 6, per_page: int = 1000,
                                 timeout: float = 8.0) -> list[dict]:
     """Pobiera dłuższą historię funding cofając się w czasie (endTime), żeby werdykt

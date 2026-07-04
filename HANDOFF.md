@@ -9,7 +9,7 @@
 
 One Wish to **realny bot tradingowy**: delta-neutral **basis/funding carry** na
 Binance (long spot + short perp, inkasowanie funding). Backend Python, event-driven,
-**288 testów pytest zielonych**. Edge (carry) **zwalidowany na ~roku realnej historii
+**296 testów pytest zielonych**. Edge (carry) **zwalidowany na ~roku realnej historii
 funding (~+18%/rok delta-neutral po prowizjach)**. Bot poprawnie wchodzi w carry na
 realnych danych. Realny handel jest **domyślnie zablokowany** — jesteśmy w fazie
 paper/walidacji, przed transportem na testnecie i pilotem.
@@ -29,7 +29,7 @@ Folder roboczy: katalog repo (na GitHubie). Testy: `python -m pytest -q`.
   prowizje — naprawione).
 - **Tryb „dislocation"** (opcjonalny, do badań): wejście na perp-rich spike.
 
-## 2. Status — co działa (288 testów zielonych)
+## 2. Status — co działa (296 testów zielonych)
 
 Pełny pipeline event-driven (`backend/`):
 
@@ -102,10 +102,11 @@ backend/
   backtest/    engine (Backtester), metrics
   research/    edge_validation (M3.5), funding_study (werdykt carry),
                portfolio_study (walidator Tier A: wagi vs zwrot/ryzyko),
-               universe (ranking aktywów), recorder (zapis ticków)
+               universe (ranking aktywów), recorder (zapis ticków),
+               liquidation_risk (ryzyko likwidacji altów z cen)
 scripts/       study_funding, run_backtest, run_edge_validation, run_paper_live,
                record_market, record_liquidations, scan_universe, run_testnet_smoke
-tests/         pełna suita pytest (288)
+tests/         pełna suita pytest (296)
 Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md,
                CARRY_VERDICT.md, UNIVERSE_SCAN.md, DATA_CONTRACT.md, RUNBOOK.md, ten HANDOFF.md
 ```
@@ -113,7 +114,7 @@ Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md
 ## 6. Jak uruchomić
 
 ```
-python -m pytest -q                              # 288 testów
+python -m pytest -q                              # 296 testów
 python scripts/study_funding.py                  # werdykt carry na historii funding (natychmiast)
 python scripts/scan_universe.py --top 25         # ranking aktywów po carry
 python scripts/run_backtest.py                   # backtest carry vs scalp (synthetic)
@@ -254,6 +255,20 @@ Z przeglądów Codexa „survive live" — zrobione: P0 OrderManager, #4 kwantyz
   jak „18%" na majorsach. **NASTĘPNY KROK: właściciel odpala re-run study_funding →
   wiersz „WALK-FORWARD alty 4h" pokaże uczciwą liczbę OOS altów. Dopiero ona decyduje,
   czy wchodzić w te alty.** (Bez tego wchodzenie = powtórzenie błędu z majorsami.)
+- ⚠️⚠️ **KRYTYCZNE (realny werdykt): alty 4h OOS = +16.15%/rok kapitał, ale maxDD
+  0.21% / Calmar 102 to FAŁSZYWE ryzyko.** Walk-forward mierzy tylko drawdown STRUMIENIA
+  FUNDING — VELVET/TAC mają 99% dodatnich rozliczeń, więc krzywa funding rośnie gładko.
+  To IGNORUJE realne ryzyko: **likwidację nogi short przy gwałtownym wzroście ceny alta**
+  (VELVET/TAC to zmienne nowe kontrakty). Wysoki funding = zapłata za tę zmienność.
+  Calmar 102 = sygnał, że mierzymy złe ryzyko, NIE że to maszynka do pieniędzy.
+- ✅ **Tier A #6: ocena ryzyka likwidacji** (`backend/research/liquidation_risk.py` +
+  `scripts/study_alt_risk.py`) — mierzy ryzyko, którego funding-study nie widzi:
+  `fetch_klines` pobiera realną historię CEN (perp klines), `assess_short_liquidation`
+  sprawdza, czy historyczny ruch ceny w górę przekroczył próg likwidacji shorta
+  (3x→+31%, 4x→+23%, 5x→+18%). Zapisuje LIQUIDATION_RISK.md. **NASTĘPNY KROK właściciela:
+  `python scripts/study_alt_risk.py` na maszynie z Binance → pokaże, czy VELVET/TAC/HYPE
+  kiedykolwiek by zlikwidowały short. DOPIERO to (razem z 16% funding) mówi, czy i jaką
+  dźwignią wolno wejść w alty.**
 
 **Zostało (buildable-now):**
 
