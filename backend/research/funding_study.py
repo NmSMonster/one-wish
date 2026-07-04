@@ -76,7 +76,26 @@ def count_funding_gaps(history: list[dict], tol_frac: float = 0.25) -> dict:
     return {"n": len(times), "missing_settlements": missing, "irregular_gaps": anomalies}
 
 
-def analyze_funding(rates: list[float]) -> FundingStats:
+def infer_settle_per_year(history: list[dict]) -> dict:
+    """Wyprowadza REALNY interwał funding z medianowego odstępu `fundingTime`.
+    Kluczowe dla poprawnej annualizacji: nowe alty (VELVET/TAC/HYPE) rozliczają się
+    często co 4h albo 1h, nie 8h — annualizacja stałym 3×365 daje wtedy błędny wynik.
+    Zwraca interwał w godzinach, liczbę rozliczeń/rok i czy to standardowe 8h."""
+    times = sorted(int(item["fundingTime"]) for item in history
+                   if str(item.get("fundingTime", "")).lstrip("-").isdigit())
+    if len(times) < 3:
+        return {"interval_hours": 8.0, "settle_per_year": float(_SETTLE_PER_YEAR),
+                "standard_8h": True, "n": len(times)}
+    gaps = sorted(cur - prev for prev, cur in zip(times, times[1:]) if cur > prev)
+    median_ms = gaps[len(gaps) // 2]
+    interval_hours = median_ms / 3_600_000.0
+    settle_per_year = 8760.0 / interval_hours if interval_hours > 0 else float(_SETTLE_PER_YEAR)
+    standard = abs(interval_hours - 8.0) <= 8.0 * 0.25   # 8h ±25%
+    return {"interval_hours": interval_hours, "settle_per_year": settle_per_year,
+            "standard_8h": standard, "n": len(times)}
+
+
+def analyze_funding(rates: list[float], settle_per_year: float = _SETTLE_PER_YEAR) -> FundingStats:
     if not rates:
         return FundingStats(0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
     bps = [r * 1e4 for r in rates]
@@ -85,31 +104,34 @@ def analyze_funding(rates: list[float]) -> FundingStats:
         mean_bps=fmean(bps),
         median_bps=median(bps),
         pct_positive=sum(1 for b in bps if b > 0) / len(bps) * 100.0,
-        annualized_pct=fmean(rates) * _SETTLE_PER_YEAR * 100.0,
+        annualized_pct=fmean(rates) * settle_per_year * 100.0,
         min_bps=min(bps),
         max_bps=max(bps),
     )
 
 
-def _annualize(net_bps: float, total_periods: int) -> float:
+def _annualize(net_bps: float, total_periods: int,
+               settle_per_year: float = _SETTLE_PER_YEAR) -> float:
     if total_periods <= 0:
         return 0.0
-    years = total_periods / _SETTLE_PER_YEAR
+    years = total_periods / settle_per_year
     return (net_bps / 100.0) / years if years > 0 else 0.0
 
 
-def simulate_carry_always_in(rates: list[float], round_trip_fee_bps: float = 18.6) -> CarryResult:
+def simulate_carry_always_in(rates: list[float], round_trip_fee_bps: float = 18.6,
+                             settle_per_year: float = _SETTLE_PER_YEAR) -> CarryResult:
     """Najprostszy carry: wejście raz, trzymanie przez całą historię, wyjście raz.
     Inkasuje KAŻDY funding (też ujemny), płaci jeden round-trip."""
     funding = sum(r * 1e4 for r in rates)
     fees = round_trip_fee_bps if rates else 0.0
     net = funding - fees
     return CarryResult("always-in", funding, fees, net, 1 if rates else 0,
-                       len(rates), len(rates), _annualize(net, len(rates)))
+                       len(rates), len(rates), _annualize(net, len(rates), settle_per_year))
 
 
 def simulate_carry_positive_only(rates: list[float], round_trip_fee_bps: float = 18.6,
-                                 entry_threshold_bps: float = 0.0) -> CarryResult:
+                                 entry_threshold_bps: float = 0.0,
+                                 settle_per_year: float = _SETTLE_PER_YEAR) -> CarryResult:
     """Wchodzi gdy funding > próg, trzyma dopóki dodatni, wychodzi gdy ≤ 0.
     Każdy cykl wejście+wyjście kosztuje jeden round-trip."""
     in_pos = False
@@ -134,11 +156,12 @@ def simulate_carry_positive_only(rates: list[float], round_trip_fee_bps: float =
                 in_pos = False
     net = funding - fees
     return CarryResult("positive-only", funding, fees, net, cycles, held,
-                       len(rates), _annualize(net, len(rates)))
+                       len(rates), _annualize(net, len(rates), settle_per_year))
 
 
 def simulate_carry_smoothed(rates: list[float], round_trip_fee_bps: float = 18.6,
-                            window: int = 9) -> CarryResult:
+                            window: int = 9,
+                            settle_per_year: float = _SETTLE_PER_YEAR) -> CarryResult:
     """Carry z wygładzonym sygnałem: wchodzi/wychodzi wg ŚREDNIEJ kroczącej funding
     (≈ window×8h reżimu), więc NIE churnuje na pojedynczym ujemnym funding. To
     właściwa polityka: trzymaj przez szum, wyjdź dopiero gdy reżim się odwróci."""
@@ -166,4 +189,4 @@ def simulate_carry_smoothed(rates: list[float], round_trip_fee_bps: float = 18.6
                 in_pos = False
     net = funding - fees
     return CarryResult("smoothed", funding, fees, net, cycles, held,
-                       len(rates), _annualize(net, len(rates)))
+                       len(rates), _annualize(net, len(rates), settle_per_year))
