@@ -201,3 +201,33 @@ def test_walk_forward_default_settle_per_year_unchanged():
     # brak podania settle_per_year = stare zachowanie (8h)
     wf = walk_forward({"A": _const(0.0002, 600)}, train=300, test=150, round_trip_fee_bps=FEE)
     assert abs(wf.settle_per_year - 3 * 365) < 1e-9
+
+
+# -- walk-forward: ryzyko OOS (drawdown/Calmar ze zszytej krzywej) ----------- #
+def test_portfolio_returns_per_settlement_series():
+    res = simulate_portfolio({"A": _const(0.0002, 50)}, {"A": 1.0}, round_trip_fee_bps=FEE)
+    assert len(res.per_settlement_bps) == 50
+    # suma przyrostów = wynik końcowy
+    assert abs(sum(res.per_settlement_bps) - res.final_net_bps) < 1e-9
+
+
+def test_walk_forward_reports_drawdown_on_negative_stretch():
+    # dodatni reżim treningowy, potem mocny ujemny w oknie testowym → realne obsunięcie
+    rates = {"A": _const(0.0003, 400) + _const(-0.0004, 200) + _const(0.0003, 400)}
+    wf = walk_forward(rates, train=300, test=150, round_trip_fee_bps=FEE)
+    assert wf.max_drawdown_pct > 0
+    assert wf.worst_settlement_bps < 0
+    assert wf.calmar is not None
+
+
+def test_walk_forward_no_drawdown_when_monotonic():
+    wf = walk_forward({"A": _const(0.0003, 600)}, train=300, test=150, round_trip_fee_bps=0.0)
+    assert wf.max_drawdown_pct == 0.0
+    assert wf.calmar is None            # brak obsunięcia → Calmar nieokreślony
+
+
+def test_walk_forward_no_trade_windows_flat_equity_no_drawdown():
+    # sam ujemny funding → wszystkie okna bez handlu → płaski kapitał, zero obsunięcia
+    wf = walk_forward({"A": _const(-0.0002, 600)}, train=300, test=150, round_trip_fee_bps=FEE)
+    assert wf.max_drawdown_pct == 0.0
+    assert wf.total_net_bps == 0.0

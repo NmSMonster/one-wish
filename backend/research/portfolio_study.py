@@ -40,6 +40,7 @@ class PortfolioResult:
     max_drawdown_pct: float          # najgłębsze obsunięcie krzywej (w % kapitału)
     calmar: float | None             # annualized / maxDD; None gdy maxDD == 0
     worst_settlement_bps: float      # najgorsze pojedyncze rozliczenie portfela
+    per_settlement_bps: list[float] = field(default_factory=list)  # przyrosty netto/rozliczenie
 
 
 def smoothed_equity_curve(rates: list[float], round_trip_fee_bps: float = 18.6,
@@ -158,6 +159,7 @@ def simulate_portfolio(rates_by_asset: dict[str, list[float]], weights: dict[str
         max_drawdown_pct=max_dd_pct,
         calmar=calmar,
         worst_settlement_bps=min(per_settlement),
+        per_settlement_bps=per_settlement,
     )
 
 
@@ -193,6 +195,9 @@ class WalkForwardResult:
     total_net_bps: float = 0.0
     n_test_periods: int = 0
     settle_per_year: float = _SETTLE_PER_YEAR
+    max_drawdown_pct: float = 0.0        # obsunięcie ZSZYTEJ krzywej wszystkich okien OOS
+    calmar: float | None = None          # annualized / maxDD (None gdy brak obsunięcia)
+    worst_settlement_bps: float = 0.0    # najgorsze pojedyncze rozliczenie OOS
 
     @property
     def annualized_net_pct(self) -> float:
@@ -222,6 +227,7 @@ def walk_forward(rates_by_asset: dict[str, list[float]], *, train: int, test: in
         raise ValueError(f"historia za krótka: {n} < train+test = {train + test}")
 
     result = WalkForwardResult(label=label, train=train, test=test, settle_per_year=settle_per_year)
+    increments: list[float] = []          # przyrosty netto/rozliczenie ZSZYTE przez wszystkie okna OOS
     for start in range(train, n - test + 1, test):
         train_slices = {k: v[start - train:start] for k, v in aligned.items()}
         test_slices = {k: v[start:start + test] for k, v in aligned.items()}
@@ -235,6 +241,7 @@ def walk_forward(rates_by_asset: dict[str, list[float]], *, train: int, test: in
         if not candidates:
             result.windows.append(WalkForwardWindow(start - train, start, start + test, {}, 0.0, 0.0))
             result.n_test_periods += test
+            increments.extend([0.0] * test)   # okno bez handlu = płaski kapitał
             continue
 
         weights = (funding_weights(candidates, ref_funding_bps=ref_funding_bps)
@@ -246,4 +253,17 @@ def walk_forward(rates_by_asset: dict[str, list[float]], *, train: int, test: in
                                                 res.annualized_net_pct))
         result.total_net_bps += res.final_net_bps
         result.n_test_periods += test
+        increments.extend(res.per_settlement_bps)
+
+    # ryzyko OOS: zszyj przyrosty w jedną ciągłą krzywą kapitału i policz obsunięcie
+    if increments:
+        curve = []
+        run = 0.0
+        for x in increments:
+            run += x
+            curve.append(run)
+        result.max_drawdown_pct = _drawdown(curve) / 100.0
+        result.worst_settlement_bps = min(increments)
+        if result.max_drawdown_pct > 0:
+            result.calmar = result.annualized_net_pct / result.max_drawdown_pct
     return result

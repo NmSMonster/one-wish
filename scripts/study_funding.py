@@ -182,9 +182,10 @@ def _portfolio_section(rows: list[dict], rates_by_asset: dict[str, list[float]])
         wf = walk_forward(std_rates, train=train, test=test, top_n=min(4, len(traded)),
                           funding_weighted=True, round_trip_fee_bps=ROUND_TRIP_FEE_BPS)
         roc_wf = return_on_capital(wf.annualized_net_pct, PERP_LEVERAGE)
+        cal = f"{wf.calmar:.1f}" if wf.calmar is not None else "inf"
         out.append(f"  WALK-FORWARD 8h-majorsy (out-of-sample, train={train}/test={test}, "
                    f"{len(wf.windows)} okien): {wf.annualized_net_pct:+.2f}%/rok nominał, "
-                   f"{roc_wf:+.2f}%/rok kapitał")
+                   f"{roc_wf:+.2f}%/rok kapitał | maxDD {wf.max_drawdown_pct:.2f}% | Calmar {cal}")
         out.append("  ↑ liczba bez look-ahead — selekcja top-4/wagi TYLKO na przeszłości.")
     except ValueError as exc:
         out.append(f"  walk-forward majorsy pominieto: {exc}")
@@ -208,9 +209,10 @@ def _portfolio_section(rows: list[dict], rates_by_asset: dict[str, list[float]])
                                   funding_weighted=True, round_trip_fee_bps=ROUND_TRIP_FEE_BPS,
                                   settle_per_year=spy)
             roc_alt = return_on_capital(wf_alt.annualized_net_pct, PERP_LEVERAGE)
+            cal_alt = f"{wf_alt.calmar:.1f}" if wf_alt.calmar is not None else "inf"
             out.append(f"  WALK-FORWARD alty {iv_h:.0f}h ({', '.join(names)}, train={tr}/test={te}, "
                        f"{len(wf_alt.windows)} okien): {wf_alt.annualized_net_pct:+.2f}%/rok nominał, "
-                       f"{roc_alt:+.2f}%/rok kapitał")
+                       f"{roc_alt:+.2f}%/rok kapitał | maxDD {wf_alt.max_drawdown_pct:.2f}% | Calmar {cal_alt}")
         except ValueError as exc:
             out.append(f"  walk-forward alty {iv_h:.0f}h pominieto: {exc}")
 
