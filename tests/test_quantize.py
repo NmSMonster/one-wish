@@ -52,3 +52,26 @@ def test_order_manager_with_quantizer_rounds_qty():
     pos = book.position(Asset.BTC)
     assert abs(pos.spot_qty - 0.012) < 1e-9
     assert abs(pos.perp_qty + 0.012) < 1e-9        # short
+
+
+def test_order_manager_rejects_below_min_notional_and_stays_flat():
+    """Regresja: filtr minNotional MUSI być egzekwowany PRZED wysyłką. Zlecenie
+    poniżej minimum giełdy nie idzie na giełdę (byłby reject/orphan) — obie nogi
+    odrzucone, pozycja pozostaje FLAT (invariant delta-neutral albo flat)."""
+    import asyncio
+
+    from backend.adapters.exchange import PaperBrokerAdapter
+    from backend.core.clock import SimClock
+    from backend.execution import OrderManager, PositionBook
+    from backend.execution.order_manager import PairState
+
+    # minNotional 50$, a nominał zlecenia = 0.001 * 100 = 0.1$ → poniżej minimum
+    fs = FilterSet(
+        spot={Asset.BTC: SymbolFilters("BTCUSDT", 0.01, 0.0001, 0.0001, 50.0)},
+        perp={Asset.BTC: SymbolFilters("BTCUSDT", 0.01, 0.0001, 0.0001, 50.0)},
+    )
+    book = PositionBook()
+    om = OrderManager(PaperBrokerAdapter(slippage_bps=0.0), book, clock=SimClock(), quantizer=fs)
+    pair = asyncio.run(om.open_pair(Asset.BTC, 0.001, 0.001, 100.0, 100.0))
+    assert pair.state in (PairState.ABORTED, PairState.OPEN)
+    assert not book.is_open(Asset.BTC)             # nic nie wysłane → FLAT, zero orphana

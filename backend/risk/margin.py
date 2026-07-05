@@ -67,13 +67,18 @@ class MarginWatchdog:
 
     def __init__(self, book: PositionBook, model: MarginModel | None = None, *,
                  perp_leverage: float = 3.0, warn_health: float = 1.8,
-                 flatten_health: float = 1.3, bus: EventBus | None = None) -> None:
+                 flatten_health: float = 1.3, bus: EventBus | None = None,
+                 maintenance_by_asset: dict | None = None) -> None:
         self.book = book
         self.model = model or MarginModel()
         self.perp_leverage = perp_leverage
         self.warn_health = warn_health
         self.flatten_health = flatten_health
         self._bus = bus
+        # Per-symbol maintenance brackety (alty > majorsy). None → jeden rate z modelu.
+        # Bez tego watchdog liczyłby zdrowie altów rate'em majorsa (~0.005 vs realne
+        # ~0.02) → zdrowie zawyżone kilkukrotnie → kontrolowany flatten za późno.
+        self.maintenance_by_asset = maintenance_by_asset
         self._state: dict = {}   # asset -> 'ok' | 'warn' | 'critical'
 
     def attach(self, bus: EventBus) -> None:
@@ -92,7 +97,8 @@ class MarginWatchdog:
         mark = tick.mark_price if tick.mark_price > 0 else tick.perp
         notional = abs(pos.perp_qty) * pos.perp_entry
         posted = notional / self.perp_leverage
-        health = self.model.health_short(pos.perp_entry, mark, notional, posted)
+        mmr = self.maintenance_by_asset.get(tick.asset) if self.maintenance_by_asset else None
+        health = self.model.health_short(pos.perp_entry, mark, notional, posted, mmr=mmr)
         prev = self._state.get(tick.asset, "ok")
 
         if health <= self.flatten_health:

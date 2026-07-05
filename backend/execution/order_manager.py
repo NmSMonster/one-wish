@@ -101,6 +101,19 @@ class OrderManager:
         if qty <= 0:                  # poniżej step size — nie da się złożyć
             mo.state = OrderStatus.REJECTED
             return mo
+        # Filtry symbolu (minQty/minNotional): nie wysyłaj zlecenia, które giełda i tak
+        # odrzuci — marnuje próby i grozi orphanem (jedna noga poniżej minimum). Lepiej
+        # od razu REJECTED → OrderManager skompensuje parę do flat (invariant).
+        if self.quantizer is not None:
+            f = self.quantizer.get(asset, leg)
+            if f is not None and not f.ok(price, qty):
+                await self._emit(EventType.ORDER_REJECTED,
+                                 {"coid": None, "asset": asset.value, "leg": leg.value,
+                                  "reason": f"poniżej minimum symbolu (minQty/minNotional): "
+                                            f"qty={qty}, notional={price * qty:.2f}$"},
+                                 self._clock.now(), Severity.WARNING)
+                mo.state = OrderStatus.REJECTED
+                return mo
         while mo.attempts < self.max_attempts and mo.filled_qty < qty - 1e-9:
             mo.attempts += 1
             coid = self._next_coid(asset, leg)

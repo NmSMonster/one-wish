@@ -1,6 +1,8 @@
 """Testy: FundingAccrual — short perp inkasuje funding przy rozliczeniu."""
 import asyncio
 
+import pytest
+
 from backend.core.bus import EventBus
 from backend.core.events import Event, EventType
 from backend.core.types import Asset, Fill, Leg, MarketTick, Side
@@ -67,3 +69,23 @@ def test_no_funding_without_settlement_crossing():
 
     asyncio.run(run())
     assert book.funding_collected == 0.0
+
+
+def test_snapshot_net_counts_funding_once_not_twice():
+    """Regresja: dla OTWARTEJ pozycji funding trafiał i do `unrealized` (bo
+    unrealized_pnl go dodawał) i do `funding_collected` → PnLSnapshot.net podwajał
+    funding. Po fixie snapshot liczy czysty mark-to-market, więc net liczy funding RAZ."""
+    book = PositionBook()
+    _open_delta_neutral(book)                       # short 0.01 @ 60k, delta-neutral
+    book.add_funding(Asset.BTC, 0.12)               # zainkasowany funding
+    # marki = entry → mark-to-market = 0; jedyny wynik to funding
+    snap = book.snapshot({Asset.BTC: (60_000.0, 60_000.0)}, 5.0)
+    assert snap.unrealized == 0.0                   # czysty MtM bez funding
+    assert snap.funding_collected == 0.12
+    assert snap.net == 0.12                          # RAZ, nie 0.24
+
+    # sanity: karta pozycji nadal pokazuje funding w unrealized_pnl (per-pozycja),
+    # a price_pnl jest czysty
+    pos = book.position(Asset.BTC)
+    assert pos.price_pnl(60_000.0, 60_000.0) == 0.0
+    assert pos.unrealized_pnl(60_000.0, 60_000.0) == pytest.approx(0.12)

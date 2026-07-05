@@ -14,6 +14,7 @@ from ..execution import ExecutionEngine, FundingAccrual, PositionBook
 from ..model.costs import CostModel
 from ..model.fair_value import FairValueModel
 from ..risk import CircuitBreaker, MarginModel, MarginWatchdog, RiskConfig, RiskManager
+from ..risk.margin import DEFAULT_MAINTENANCE_BY_ASSET
 from ..signal import RepricingDetector
 from ..strategy import FundingWeightedSizer, StrategyPolicy
 
@@ -63,7 +64,8 @@ class Pipeline:
         self.margin = MarginWatchdog(
             self.book, MarginModel(rc.maintenance_margin_rate),
             perp_leverage=rc.perp_leverage, warn_health=rc.margin_warn_health,
-            flatten_health=rc.margin_flatten_health)
+            flatten_health=rc.margin_flatten_health,
+            maintenance_by_asset=DEFAULT_MAINTENANCE_BY_ASSET)
 
         # cache ticka (circuit, risk, execution) PRZED detektorem emitującym sygnał
         self.circuit.attach(bus)

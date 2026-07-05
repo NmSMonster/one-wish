@@ -81,7 +81,10 @@ class PositionBook:
         unrealized = 0.0
         for asset, p in self.positions.items():
             if p.is_open and asset in marks:
-                unrealized += p.unrealized_pnl(marks[asset][0], marks[asset][1])
+                # CZYSTY mark-to-market (bez funding) — funding wchodzi RAZ przez
+                # funding_collected niżej. Użycie unrealized_pnl (z funding) tutaj
+                # podwajałoby funding w PnLSnapshot.net dla otwartych pozycji.
+                unrealized += p.price_pnl(marks[asset][0], marks[asset][1])
         return PnLSnapshot(
             ts=ts,
             realized=self.realized_pnl,

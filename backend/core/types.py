@@ -290,10 +290,19 @@ class Position:
     def is_open(self) -> bool:
         return self.closed_ts is None and (abs(self.spot_qty) > 1e-12 or abs(self.perp_qty) > 1e-12)
 
-    def unrealized_pnl(self, spot_mark: float, perp_mark: float) -> float:
+    def price_pnl(self, spot_mark: float, perp_mark: float) -> float:
+        """Czysty mark-to-market obu nóg (BEZ funding). Dla pary delta-neutral bliski
+        zeru — kierunkowy ruch znosi się między long spot a short perp."""
         spot_pnl = self.spot_qty * (spot_mark - self.spot_entry)
         perp_pnl = self.perp_qty * (perp_mark - self.perp_entry)
-        return spot_pnl + perp_pnl + self.funding_accrued
+        return spot_pnl + perp_pnl
+
+    def unrealized_pnl(self, spot_mark: float, perp_mark: float) -> float:
+        """Niezrealizowany wynik pozycji: mark-to-market + zainkasowany funding.
+        UWAGA: to jest wielkość PER POZYCJA (karta GUI). NIE sumuj jej z osobnym
+        `funding_collected` książki — funding byłby policzony dwukrotnie. Do agregatu
+        PnL książki używaj `price_pnl` + `funding_collected` (patrz PositionBook.snapshot)."""
+        return self.price_pnl(spot_mark, perp_mark) + self.funding_accrued
 
 
 @dataclass(frozen=True)

@@ -70,7 +70,7 @@ def event_to_gui(event: Event, marks: dict | None = None) -> dict | None:
         mark = (marks or {}).get(p.asset, (p.spot_entry, p.perp_entry))
         return {"type": "position", "id": p.id, "asset": p.asset.value, "spotQty": p.spot_qty,
                 "spotEntry": p.spot_entry, "perpQty": p.perp_qty, "perpEntry": p.perp_entry,
-                "netDelta": p.net_delta, "unrealizedPnl": p.unrealized_pnl(mark[0], mark[1]),
+                "netDelta": p.net_delta, "unrealizedPnl": p.price_pnl(mark[0], mark[1]),
                 "fundingAccrued": p.funding_accrued, "marginRatio": None, "openedTs": p.opened_ts}
 
     if t in _ORDER_EVENTS and isinstance(p, OrderRequest):

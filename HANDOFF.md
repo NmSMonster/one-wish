@@ -9,7 +9,7 @@
 
 One Wish to **realny bot tradingowy**: delta-neutral **basis/funding carry** na
 Binance (long spot + short perp, inkasowanie funding). Backend Python, event-driven,
-**312 testów pytest zielonych**. Edge (carry) **zwalidowany na ~roku realnej historii
+**316 testów pytest zielonych**. Edge (carry) **zwalidowany na ~roku realnej historii
 funding (~+18%/rok delta-neutral po prowizjach)**. Bot poprawnie wchodzi w carry na
 realnych danych. Realny handel jest **domyślnie zablokowany** — jesteśmy w fazie
 paper/walidacji, przed transportem na testnecie i pilotem.
@@ -29,7 +29,7 @@ Folder roboczy: katalog repo (na GitHubie). Testy: `python -m pytest -q`.
   prowizje — naprawione).
 - **Tryb „dislocation"** (opcjonalny, do badań): wejście na perp-rich spike.
 
-## 2. Status — co działa (312 testów zielonych)
+## 2. Status — co działa (316 testów zielonych)
 
 Pełny pipeline event-driven (`backend/`):
 
@@ -106,7 +106,7 @@ backend/
                liquidation_risk (ryzyko likwidacji altów z cen)
 scripts/       study_funding, run_backtest, run_edge_validation, run_paper_live,
                record_market, record_liquidations, scan_universe, run_testnet_smoke
-tests/         pełna suita pytest (312)
+tests/         pełna suita pytest (316)
 Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md,
                CARRY_VERDICT.md, UNIVERSE_SCAN.md, DATA_CONTRACT.md, RUNBOOK.md, ten HANDOFF.md
 ```
@@ -114,7 +114,7 @@ Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md
 ## 6. Jak uruchomić
 
 ```
-python -m pytest -q                              # 312 testów
+python -m pytest -q                              # 316 testów
 python scripts/study_funding.py                  # werdykt carry na historii funding (natychmiast)
 python scripts/scan_universe.py --top 25         # ranking aktywów po carry
 python scripts/run_backtest.py                   # backtest carry vs scalp (synthetic)
@@ -303,6 +303,36 @@ Z przeglądów Codexa „survive live" — zrobione: P0 OrderManager, #4 kwantyz
   (basisBps≈60, perpQty<0 = short, seria PnL niepusta, decyzja ryzyka). Wcześniejsze
   testy GUI pokrywały translację `event_to_gui` i round-trip WS w izolacji; ten
   domyka lukę integracyjną: backend → kontrakt → GUI jako jeden przepływ.
+
+- ✅ **Audyt całego projektu — bugfixy (branch handoff):** przeskanowane moduły
+  krytyczne dla pieniędzy/bezpieczeństwa. Naprawione 3 realne błędy + regresje:
+  1. **Funding liczony podwójnie w `PnLSnapshot.net`** (HIGH): `unrealized_pnl`
+     zawierał funding, a `book.snapshot` sumował go do `unrealized` I dodawał osobno
+     `funding_collected` → net dla OTWARTYCH pozycji zawyżony o funding (dla carry to
+     główny zysk → nagłówkowy PnL na GUI ~2× zawyżony podczas trzymania). Fix: dodano
+     `Position.price_pnl` (czysty MtM); snapshot liczy MtM, funding wchodzi RAZ przez
+     `funding_collected`; karta GUI pokazuje `price_pnl` + osobno `fundingAccrued`.
+  2. **MarginWatchdog liczył zdrowie jednym rate'em dla wszystkich aktywów** (HIGH):
+     `DEFAULT_MAINTENANCE_BY_ASSET` był tylko w stress-testerze, nie w LIVE watchdogu →
+     alty (realne ~0.02) monitorowane rate'em majorsa (~0.005) → zdrowie zawyżone ~4× →
+     kontrolowany flatten za późno na dokładnie tych zmiennych altach, które strategia
+     teraz celuje. Fix: watchdog przyjmuje `maintenance_by_asset`, Pipeline podaje
+     tabelę; bez tabeli zachowanie bez zmian (zero regresji dla istniejących testów).
+  3. **Filtr `SymbolFilters.ok()` (minQty/minNotional) był martwy** (MED): OrderManager
+     kwantyzował, ale nie sprawdzał minimum → zlecenia poniżej minimum szły na giełdę
+     (reject/orphan). Fix: `_submit` odrzuca sub-minimum PRZED wysyłką → para zostaje
+     flat (invariant), zero marnowanych prób. (opt-in, dotyczy ścieżki live z filtrami).
+  Suita 312→**316** (regresje: double-count funding, per-asset mmr watchdog +
+  brak-regresji, min-notional reject). **Znalezione, NIE zmienione (czeka na decyzję
+  właściciela):** (a) „dzienny" limit straty NIE jest dzienny — `reset_day()` nigdy nie
+  wołany, a `_on_pnl` nadpisuje `realized_pnl_today` skumulowanym realized; dodatkowo
+  guard (Monitor+Risk) patrzy TYLKO na `realized` (dla delta-neutral ≈ 0) i ignoruje
+  `unrealized` — czyli rozjazd basis (realny drawdown carry) NIE zatrzyma bota;
+  (b) live close bez `reduceOnly`/positionSide (na koncie hedge-mode BUY otworzyłby
+  long zamiast domknąć short — testnet-gated); (c) `ManagedOrder.avg_price` bierze
+  cenę ostatniego filla zamiast średniej ważonej (tylko informacyjnie); (d) nogi liczone
+  jako N/spot vs N/perp → resztkowa delta ~basis (w tolerancji). Rekomendacja: (a) to
+  najważniejsze — przerobić guard na drawdown NETTO (z unrealized) + realny rollover dnia.
 
 **Zostało (buildable-now):**
 

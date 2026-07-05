@@ -67,6 +67,43 @@ def test_watchdog_flattens_before_liquidation():
     assert warnings and warnings[-1]["action"] == "flatten" and warnings[-1]["health"] < 1.3
 
 
+def test_watchdog_uses_per_asset_maintenance_bracket():
+    """Regresja bezpieczeństwa: watchdog musi liczyć zdrowie realnym maintenance
+    aktywa. Wysoki bracket (0.02) daje niższe zdrowie niż domyślny rate modelu
+    (0.005) przy tym samym ruchu → flatten wcześniej. Bez per-asset mmr watchdog
+    zawyżałby zdrowie altów kilkukrotnie i domykał parę za późno."""
+    book = _book_with_short()
+    bus = EventBus()
+    wd = MarginWatchdog(book, MarginModel(0.005), perp_leverage=3.0,
+                        warn_health=1.8, flatten_health=1.3,
+                        maintenance_by_asset={Asset.BTC: 0.02})
+    wd.attach(bus)
+    warnings: list = []
+    intents: list = []
+    bus.subscribe(EventType.MARGIN_WARNING, lambda e: warnings.append(e.payload))
+    bus.subscribe(EventType.TRADE_INTENT, lambda e: intents.append(e.payload))
+
+    asyncio.run(bus.publish(Event(EventType.MARKET_TICK, 2.0, "s", payload=_tick(131.0))))
+
+    # z mmr 0.02 zdrowie przy +31% spada w strefę flatten (z 0.005 byłoby bezpieczne)
+    assert warnings and warnings[-1]["action"] == "flatten"
+    assert any(getattr(i, "action", None) == "CLOSE" for i in intents)
+
+
+def test_watchdog_default_no_bracket_matches_model_rate():
+    """Bez maintenance_by_asset watchdog działa jak dotąd (rate z modelu) — zero
+    regresji dla istniejącego okablowania: +31% przy 0.005 nie domyka."""
+    book = _book_with_short()
+    bus = EventBus()
+    wd = MarginWatchdog(book, MarginModel(0.005), perp_leverage=3.0,
+                        warn_health=1.8, flatten_health=1.3)
+    wd.attach(bus)
+    intents: list = []
+    bus.subscribe(EventType.TRADE_INTENT, lambda e: intents.append(e.payload))
+    asyncio.run(bus.publish(Event(EventType.MARKET_TICK, 2.0, "s", payload=_tick(131.0))))
+    assert not any(getattr(i, "action", None) == "CLOSE" for i in intents)
+
+
 def test_watchdog_silent_when_safe():
     book = _book_with_short()
     bus = EventBus()
