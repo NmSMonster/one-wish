@@ -9,7 +9,7 @@
 
 One Wish to **realny bot tradingowy**: delta-neutral **basis/funding carry** na
 Binance (long spot + short perp, inkasowanie funding). Backend Python, event-driven,
-**311 testów pytest zielonych**. Edge (carry) **zwalidowany na ~roku realnej historii
+**312 testów pytest zielonych**. Edge (carry) **zwalidowany na ~roku realnej historii
 funding (~+18%/rok delta-neutral po prowizjach)**. Bot poprawnie wchodzi w carry na
 realnych danych. Realny handel jest **domyślnie zablokowany** — jesteśmy w fazie
 paper/walidacji, przed transportem na testnecie i pilotem.
@@ -29,7 +29,7 @@ Folder roboczy: katalog repo (na GitHubie). Testy: `python -m pytest -q`.
   prowizje — naprawione).
 - **Tryb „dislocation"** (opcjonalny, do badań): wejście na perp-rich spike.
 
-## 2. Status — co działa (311 testów zielonych)
+## 2. Status — co działa (312 testów zielonych)
 
 Pełny pipeline event-driven (`backend/`):
 
@@ -106,7 +106,7 @@ backend/
                liquidation_risk (ryzyko likwidacji altów z cen)
 scripts/       study_funding, run_backtest, run_edge_validation, run_paper_live,
                record_market, record_liquidations, scan_universe, run_testnet_smoke
-tests/         pełna suita pytest (311)
+tests/         pełna suita pytest (312)
 Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md,
                CARRY_VERDICT.md, UNIVERSE_SCAN.md, DATA_CONTRACT.md, RUNBOOK.md, ten HANDOFF.md
 ```
@@ -114,7 +114,7 @@ Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md
 ## 6. Jak uruchomić
 
 ```
-python -m pytest -q                              # 311 testów
+python -m pytest -q                              # 312 testów
 python scripts/study_funding.py                  # werdykt carry na historii funding (natychmiast)
 python scripts/scan_universe.py --top 25         # ranking aktywów po carry
 python scripts/run_backtest.py                   # backtest carry vs scalp (synthetic)
@@ -293,6 +293,16 @@ Z przeglądów Codexa „survive live" — zrobione: P0 OrderManager, #4 kwantyz
   daje werdykt include/dźwignia/nominał per alt. Realne alt-trading nadal wymaga
   live transportu (testnet najpierw) — ten doradca to gotowa, zwalidowana warstwa
   decyzyjna na tamtą fazę.
+- ✅ **Tier A #9: test E2E „cały bot w parze z GUI"** (`tests/test_gui_api.py::
+  test_full_pipeline_flows_to_gui_contract`) — dowód, że pełny `Pipeline` i
+  `GuiApiServer` na JEDNEJ szynie eventów grają razem: dyslokacja przechodzi cały
+  łańcuch (sygnał→ryzyko→zlecenie→fill→pozycja), a przekroczenie momentu rozliczenia
+  funding daje PnL — i KAŻDY typ kontraktu GUI (market/signal/order/fill/position/
+  pnl/risk) faktycznie wypływa do klientów (przechwyt przez override `_broadcast`,
+  bo bez podłączonego klienta WS broadcast wychodzi pusty). Sprawdza też treść
+  (basisBps≈60, perpQty<0 = short, seria PnL niepusta, decyzja ryzyka). Wcześniejsze
+  testy GUI pokrywały translację `event_to_gui` i round-trip WS w izolacji; ten
+  domyka lukę integracyjną: backend → kontrakt → GUI jako jeden przepływ.
 
 **Zostało (buildable-now):**
 

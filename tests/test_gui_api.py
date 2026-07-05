@@ -5,8 +5,11 @@ import json
 import pytest
 import websockets
 
+from backend.adapters.exchange import PaperBrokerAdapter
 from backend.api.gui_ws import GuiApiServer, event_to_gui
+from backend.app.pipeline import Pipeline
 from backend.core.bus import EventBus
+from backend.core.clock import SimClock
 from backend.core.events import Event, EventType, Severity
 from backend.core.types import (
     Asset,
@@ -22,6 +25,7 @@ from backend.core.types import (
     TradeIntent,
 )
 from tests.test_repricing import tick_with
+from tests.test_runner import _generous
 
 
 # -- translacja (czysta funkcja) ------------------------------------------- #
@@ -110,3 +114,43 @@ def test_gui_server_roundtrip():
         assert len(kills) == 1
 
     asyncio.run(scenario())
+
+
+# -- E2E: cały bot idzie w parze z GUI -------------------------------------- #
+def test_full_pipeline_flows_to_gui_contract():
+    """Dowód, że CAŁY bot działa w parze z GUI: Pipeline i GuiApiServer na jednej
+    szynie. Dyslokacja otwiera pozycję przez pełny łańcuch (sygnał→ryzyko→zlecenie
+    →fill→pozycja), a przekroczenie rozliczenia funding daje PnL. Sprawdzamy, że
+    KAŻDY typ wiadomości kontraktu GUI faktycznie wypływa do klientów."""
+
+    async def scenario():
+        bus = EventBus()
+        pipe = Pipeline(bus, risk_config=_generous(), broker=PaperBrokerAdapter(seed=1),
+                        clock=SimClock())
+        server = GuiApiServer(bus, risk=pipe.risk, connection="SIMULATION")
+        msgs: list = []
+        # bez klientów WS _broadcast wychodzi pusty — przechwytujemy wiadomości u źródła
+        server._broadcast = lambda m: msgs.append(m)
+
+        # 1) dyslokacja → otwarcie pozycji (signal/order/fill/position + risk)
+        await bus.publish(Event(EventType.MARKET_TICK, 1000.0, "s", payload=tick_with(60.0)))
+        assert pipe.book.is_open(Asset.BTC)
+        # 2) przekroczenie momentu rozliczenia funding → naliczenie → PNL_UPDATE
+        await bus.publish(Event(EventType.MARKET_TICK, 4700.0, "s",
+                                payload=tick_with(60.0, sec_to_funding=7200.0)))
+        return msgs
+
+    msgs = asyncio.run(scenario())
+    kinds = {m["type"] for m in msgs}
+    for expected in ("market", "signal", "order", "fill", "position", "pnl", "risk"):
+        assert expected in kinds, f"brak wiadomości GUI typu '{expected}'; są: {sorted(kinds)}"
+
+    # kontrakt trzyma treść, nie tylko typy: rynek/pozycja/pnl mają realne pola
+    market = next(m for m in msgs if m["type"] == "market")
+    assert market["asset"] == "BTC" and market["basisBps"] == pytest.approx(60.0, abs=0.5)
+    position = next(m for m in msgs if m["type"] == "position")
+    assert position["asset"] == "BTC" and position["perpQty"] < 0   # noga short perp
+    pnl = next(m for m in msgs if m["type"] == "pnl")
+    assert "series" in pnl and pnl["series"]                        # seria PnL rośnie
+    risk = next(m for m in msgs if m["type"] == "risk")
+    assert risk["lastDecision"] in ("RISK_APPROVED", "RISK_REJECTED")
