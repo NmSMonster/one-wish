@@ -9,7 +9,7 @@
 
 One Wish to **realny bot tradingowy**: delta-neutral **basis/funding carry** na
 Binance (long spot + short perp, inkasowanie funding). Backend Python, event-driven,
-**303 testy pytest zielone**. Edge (carry) **zwalidowany na ~roku realnej historii
+**311 testów pytest zielonych**. Edge (carry) **zwalidowany na ~roku realnej historii
 funding (~+18%/rok delta-neutral po prowizjach)**. Bot poprawnie wchodzi w carry na
 realnych danych. Realny handel jest **domyślnie zablokowany** — jesteśmy w fazie
 paper/walidacji, przed transportem na testnecie i pilotem.
@@ -29,7 +29,7 @@ Folder roboczy: katalog repo (na GitHubie). Testy: `python -m pytest -q`.
   prowizje — naprawione).
 - **Tryb „dislocation"** (opcjonalny, do badań): wejście na perp-rich spike.
 
-## 2. Status — co działa (303 testy zielone)
+## 2. Status — co działa (311 testów zielonych)
 
 Pełny pipeline event-driven (`backend/`):
 
@@ -106,7 +106,7 @@ backend/
                liquidation_risk (ryzyko likwidacji altów z cen)
 scripts/       study_funding, run_backtest, run_edge_validation, run_paper_live,
                record_market, record_liquidations, scan_universe, run_testnet_smoke
-tests/         pełna suita pytest (303)
+tests/         pełna suita pytest (311)
 Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md,
                CARRY_VERDICT.md, UNIVERSE_SCAN.md, DATA_CONTRACT.md, RUNBOOK.md, ten HANDOFF.md
 ```
@@ -114,7 +114,7 @@ Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md
 ## 6. Jak uruchomić
 
 ```
-python -m pytest -q                              # 303 testy
+python -m pytest -q                              # 311 testów
 python scripts/study_funding.py                  # werdykt carry na historii funding (natychmiast)
 python scripts/scan_universe.py --top 25         # ranking aktywów po carry
 python scripts/run_backtest.py                   # backtest carry vs scalp (synthetic)
@@ -282,6 +282,17 @@ Z przeglądów Codexa „survive live" — zrobione: P0 OrderManager, #4 kwantyz
   (których cross nie usuwa): płynność wyjścia przy pumpie, flip funding, depeg/venue,
   rozjazd basis ponad bufor. study_alt_risk pokazuje teraz kolumny isolated LIKW + cross
   przeżywa + bufor-basis. Naprawiony też błąd „najg.1bar 0.0%" (intra-bar high/open).
+
+- ✅ **Tier A #8: doradca bezpiecznych wejść w alty** (`AltCarryAdvisor` w
+  strategy/alt_carry.py) — kodyfikuje CAŁĄ analizę bezpieczeństwa w twarde reguły
+  per alt: (1) cross/portfolio margin ZAWSZE wymagany, (2) min. funding OOS (HYPE 3%
+  odpada), (3) dźwignia dobrana tak, by bufor basis ≥ próg (cross), (4) płynność
+  wejścia+wyjścia (nominał ścinany/wykluczany), (5) cap per alt, (6) min. historia
+  (świeże kontrakty wykluczane). Na realnych liczbach: VELVET/TAC → WCHODŹ 3x
+  (bufor 102%/85%, cross), HYPE → ODPUŚĆ (funding za niski). To NIE otwiera pozycji —
+  daje werdykt include/dźwignia/nominał per alt. Realne alt-trading nadal wymaga
+  live transportu (testnet najpierw) — ten doradca to gotowa, zwalidowana warstwa
+  decyzyjna na tamtą fazę.
 
 **Zostało (buildable-now):**
 
