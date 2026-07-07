@@ -9,7 +9,7 @@
 
 One Wish to **realny bot tradingowy**: delta-neutral **basis/funding carry** na
 Binance (long spot + short perp, inkasowanie funding). Backend Python, event-driven,
-**350 testów pytest zielonych**. Edge (carry) **zwalidowany na ~roku realnej historii
+**360 testów pytest zielonych**. Edge (carry) **zwalidowany na ~roku realnej historii
 funding (~+18%/rok delta-neutral po prowizjach)**. Bot poprawnie wchodzi w carry na
 realnych danych. Realny handel jest **domyślnie zablokowany** — jesteśmy w fazie
 paper/walidacji, przed transportem na testnecie i pilotem.
@@ -29,7 +29,7 @@ Folder roboczy: katalog repo (na GitHubie). Testy: `python -m pytest -q`.
   prowizje — naprawione).
 - **Tryb „dislocation"** (opcjonalny, do badań): wejście na perp-rich spike.
 
-## 2. Status — co działa (350 testów zielonych)
+## 2. Status — co działa (360 testów zielonych)
 
 Pełny pipeline event-driven (`backend/`):
 
@@ -106,7 +106,7 @@ backend/
                liquidation_risk (ryzyko likwidacji altów z cen)
 scripts/       study_funding, run_backtest, run_edge_validation, run_paper_live,
                record_market, record_liquidations, scan_universe, run_testnet_smoke
-tests/         pełna suita pytest (350)
+tests/         pełna suita pytest (360)
 Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md,
                CARRY_VERDICT.md, UNIVERSE_SCAN.md, DATA_CONTRACT.md, RUNBOOK.md, ten HANDOFF.md
 ```
@@ -114,7 +114,7 @@ Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md
 ## 6. Jak uruchomić
 
 ```
-python -m pytest -q                              # 350 testów
+python -m pytest -q                              # 360 testów
 python scripts/study_funding.py                  # werdykt carry na historii funding (natychmiast)
 python scripts/scan_universe.py --top 25         # ranking aktywów po carry
 python scripts/run_backtest.py                   # backtest carry vs scalp (synthetic)
@@ -414,6 +414,20 @@ Z przeglądów Codexa „survive live" — zrobione: P0 OrderManager, #4 kwantyz
   świeżość pilnują istniejące STALE_FEED + heartbeat. **Nie zweryfikowane na żywym
   Binance** (sandbox blokuje) — pierwsze odpalenie na maszynie właściciela:
   `python scripts/run_paper_live.py --mode live --transport ws --budget-pln 150`.
+
+- ✅ **Tier B krok 1: warstwa POMIAROWA multi-venue** — zanim powstanie egzekucja
+  na innych giełdach, mierzymy czy jest o co grać (metodologia jak Tier A):
+  `backend/adapters/market/venues.py` (publiczne historie funding Bybit/OKX;
+  czyste parsery na fixture'ach, jedyny styk I/O `_http_get_json`; mapy symboli
+  z jawnym None dla nienotowanych — VELVET/TAC tylko Binance),
+  `backend/research/multi_venue.py` (annualizacja z REALNEGO interwału rozliczeń
+  — mediana odstępów timestampów; `VenueComparison.best` = najlepsze venue dla
+  nogi short; `uplift_vs(BINANCE)` w pp/rok; `summarize` sortuje po uplifcie),
+  `scripts/study_venues.py` → tabela + `VENUE_SCAN.md`. **Uplift jest BRUTTO** —
+  przed kosztami venue i ryzykiem kontrahenta; tabela mówi CZY budować Tier B,
+  nie że wolno wchodzić. Wymaga sieci → odpalić na maszynie właściciela:
+  `python scripts/study_venues.py`. Decyzja: uplift ≥ kilka pp/rok = budujemy
+  egzekucję Tier B; ~0 pp = Binance-only wystarcza i Tier B nie jest wart ryzyka.
 
 **Zostało (buildable-now):**
 
