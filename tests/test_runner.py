@@ -21,6 +21,72 @@ def _generous() -> RiskConfig:
                       max_daily_loss_usd=50.0)
 
 
+def test_monitor_heartbeat_emergency_on_silent_feed():
+    """Regresja P0: STALE_FEED z adaptera powstaje dopiero przy NASTĘPNYM ticku.
+    Gdy feed MILKNIE całkiem, następny tick nigdy nie przychodzi — tylko heartbeat
+    Monitora może wtedy wyemitować EMERGENCY_STOP (flatten + kill)."""
+    from tests.test_funding import btc_tick
+
+    async def scenario():
+        bus = EventBus()
+        stops: list = []
+        bus.subscribe(EventType.EMERGENCY_STOP, lambda e: stops.append(e.payload))
+        mon = Monitor(stale_after_s=0.05)          # RealClock — realny upływ czasu
+        mon.attach(bus)
+        mon.start_heartbeat(0.02)
+        await bus.publish(Event(EventType.MARKET_TICK, 1.0, "s",
+                                payload=btc_tick(1.0, 100.0)))
+        await asyncio.sleep(0.3)                   # feed milknie — żadnych ticków
+        mon.stop_heartbeat()
+        return stops
+
+    stops = asyncio.run(scenario())
+    assert stops, "heartbeat powinien wykryć milczący feed i dać EMERGENCY_STOP"
+    assert "milczy" in stops[0]["reason"]
+
+
+def test_monitor_heartbeat_silent_while_feed_alive():
+    """Heartbeat nie strzela, dopóki ticki przychodzą (brak fałszywych alarmów)."""
+    from tests.test_funding import btc_tick
+
+    async def scenario():
+        bus = EventBus()
+        stops: list = []
+        bus.subscribe(EventType.EMERGENCY_STOP, lambda e: stops.append(e.payload))
+        mon = Monitor(stale_after_s=0.2)
+        mon.attach(bus)
+        mon.start_heartbeat(0.02)
+        for i in range(5):                         # żywy feed co 50ms < stale 200ms
+            await bus.publish(Event(EventType.MARKET_TICK, float(i), "s",
+                                    payload=btc_tick(float(i), 100.0)))
+            await asyncio.sleep(0.05)
+        mon.stop_heartbeat()
+        return stops
+
+    assert asyncio.run(scenario()) == []
+
+
+def test_report_includes_unrealized_mark_to_market():
+    """Regresja P1: net raportu musi zawierać mark-to-market OTWARTYCH pozycji —
+    carry celowo trzyma, więc bez tego net udaje, że trzymane pary nie mają wyniku."""
+    from backend.app.report import build_report
+    from backend.core.types import Fill, Leg, Side
+    from backend.storage import Database
+
+    db = Database()
+    book = PositionBook()
+    book.apply_fill(Fill("s", Asset.BTC, Leg.SPOT, Side.BUY, 100.0, 1.0, 0.0, 1.0), 1.0)
+    book.apply_fill(Fill("p", Asset.BTC, Leg.PERP, Side.SELL, 100.0, 1.0, 0.0, 1.0), 1.0)
+    # marki: spot 130 / perp 120 → MtM = +30 − 20 = +10
+    rep = build_report(db, book, marks={Asset.BTC: (130.0, 120.0)})
+    assert abs(rep.unrealized - 10.0) < 1e-9
+    assert abs(rep.net - 10.0) < 1e-9              # realized=0, fees=0, funding=0
+    assert "niezrealiz" in rep.summary()
+    # bez marks — zachowanie jak dotąd (unrealized 0)
+    rep0 = build_report(db, book)
+    assert rep0.unrealized == 0.0
+
+
 def test_monitor_emergency_on_daily_loss():
     bus = EventBus()
     stops: list = []

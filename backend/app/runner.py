@@ -103,6 +103,11 @@ class OneWishApp:
 
         monitor = Monitor(bus, max_daily_loss_usd=self.risk_config.max_daily_loss_usd, clock=clock)
         monitor.attach(bus)
+        if self.mode == "live":
+            # heartbeat łapie feed, który MILKNIE: adapterowy STALE_FEED powstaje
+            # dopiero przy następnym ticku — przy pełnej ciszy nigdy by nie przyszedł
+            # i bot wisiałby z otwartymi pozycjami na martwych danych.
+            monitor.start_heartbeat()
 
         if self.alerts:
             # alerty operatora poza GUI (margin/kill/emergency/stale...). Sinki z env:
@@ -129,7 +134,10 @@ class OneWishApp:
         try:
             await adapter.run()
         finally:
-            self.report = build_report(db, pipe.book)
+            monitor.stop_heartbeat()
+            # raport z mark-to-market otwartych pozycji (ostatnie znane ceny) — bez
+            # tego net udawałby, że trzymane pozycje nie mają wyniku
+            self.report = build_report(db, pipe.book, marks=pipe.execution.marks)
             if self.telemetry is not None:
                 snap = self.telemetry.snapshot()
                 log.info("Cost telemetry (shadow): slip_spot=%.2fbps slip_perp=%.2fbps "

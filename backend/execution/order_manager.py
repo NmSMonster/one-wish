@@ -188,15 +188,22 @@ class OrderManager:
             return False
         return abs(pos.net_delta) <= self.tol_frac * max(1e-12, qty_ref)
 
-    async def _flatten(self, asset: Asset) -> None:
+    async def _flatten(self, asset: Asset, spot_px: float | None = None,
+                       perp_px: float | None = None) -> None:
+        """Domyka pozycję po CENIE RYNKOWEJ (spot_px/perp_px), nie po cenie wejścia.
+        Zamknięcie po entry fałszowałoby PnL: paper broker fill'uje po req.price,
+        więc cały ruch ceny od wejścia znikałby z realized. Fallback do entry tylko
+        gdy ceny rynkowej nie znamy (brak ticka — lepsze to niż brak domknięcia)."""
         pos = self.book.position(asset)
         if pos is None or not pos.is_open:
             return
         if pos.spot_qty > 1e-9:
-            await self._submit(asset, Leg.SPOT, Side.SELL, pos.spot_qty, pos.spot_entry, "CLOSE")
+            px = spot_px if spot_px and spot_px > 0 else pos.spot_entry
+            await self._submit(asset, Leg.SPOT, Side.SELL, pos.spot_qty, px, "CLOSE")
         pos = self.book.position(asset)
         if pos is not None and pos.perp_qty < -1e-9:
-            await self._submit(asset, Leg.PERP, Side.BUY, abs(pos.perp_qty), pos.perp_entry, "CLOSE")
+            px = perp_px if perp_px and perp_px > 0 else pos.perp_entry
+            await self._submit(asset, Leg.PERP, Side.BUY, abs(pos.perp_qty), px, "CLOSE")
 
     async def open_pair(self, asset: Asset, qty_spot: float, qty_perp: float,
                         spot_px: float, perp_px: float) -> PairOrder:
@@ -211,12 +218,15 @@ class OrderManager:
         else:
             # INVARIANT: nie zostawiamy orphan leg — kompensujemy do flat
             log.warning("Niepełna para %s — kompensacja (flatten)", asset.value)
-            await self._flatten(asset)
+            await self._flatten(asset, spot_px, perp_px)
             pair.state = PairState.ABORTED
         self._pairs.append(pair)
         return pair
 
-    async def close_pair(self, asset: Asset) -> PairOrder:
+    async def close_pair(self, asset: Asset, spot_px: float | None = None,
+                         perp_px: float | None = None) -> PairOrder:
+        """Zamyka parę po CENIE RYNKOWEJ (jak _flatten) — entry tylko jako fallback,
+        gdy wołający nie zna bieżących cen (np. testy jednostkowe bez ticków)."""
         self._pair_seq += 1
         pair = PairOrder(id=f"pair-{self._pair_seq}", asset=asset, action="CLOSE")
         pos = self.book.position(asset)
@@ -224,12 +234,14 @@ class OrderManager:
             pair.state = PairState.CLOSED
             return pair
         if pos.spot_qty > 1e-9:
+            px = spot_px if spot_px and spot_px > 0 else pos.spot_entry
             pair.spot = await self._submit(asset, Leg.SPOT, Side.SELL, pos.spot_qty,
-                                           pos.spot_entry, "CLOSE")
+                                           px, "CLOSE")
         pos = self.book.position(asset)
         if pos is not None and pos.perp_qty < -1e-9:
+            px = perp_px if perp_px and perp_px > 0 else pos.perp_entry
             pair.perp = await self._submit(asset, Leg.PERP, Side.BUY, abs(pos.perp_qty),
-                                           pos.perp_entry, "CLOSE")
+                                           px, "CLOSE")
         pair.state = PairState.CLOSED if not self.book.is_open(asset) else PairState.OPEN
         self._pairs.append(pair)
         return pair

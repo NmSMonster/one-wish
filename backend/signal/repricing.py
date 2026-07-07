@@ -36,6 +36,7 @@ class RepricingDetector:
         entry_mode: str = "carry",
         notional_usd: float = 200.0,
         min_funding_bps: float = 0.1,        # min forward funding/8h (~1.1%/rok floor); carry trzyma długo, amortyzuje koszt
+        carry_max_payback_settles: float = 30.0,  # koszt round-trip musi zwrócić się z funding w ≤N rozliczeń (30×8h = 10 dni)
         basis_floor_bps: float = 10.0,       # nie wchodzimy, gdy basis < −floor (perp za tani)
         min_edge_bps: float = 2.0,           # tryb dislocation
         min_dislocation_bps: float = 4.0,    # tryb dislocation
@@ -51,6 +52,7 @@ class RepricingDetector:
         self.entry_mode = entry_mode
         self.notional_usd = notional_usd
         self.min_funding_bps = min_funding_bps
+        self.carry_max_payback_settles = carry_max_payback_settles
         self.basis_floor_bps = basis_floor_bps
         self.min_edge_bps = min_edge_bps
         self.min_dislocation_bps = min_dislocation_bps
@@ -64,6 +66,7 @@ class RepricingDetector:
         # inaczej ważona (większa) pozycja przechodzi bramkę płynności policzoną dla
         # mniejszego, płaskiego nominału i margines bezpieczeństwa jest zawyżony.
         self.sizer = sizer
+        self.last_fair_value = None
         self._last_state: dict = {}
         self._bus: EventBus | None = None
 
@@ -86,6 +89,7 @@ class RepricingDetector:
 
     def evaluate(self, tick: MarketTick) -> Signal:
         fv = self.model.evaluate(tick)
+        self.last_fair_value = fv          # do publikacji FAIR_VALUE na szynę (audyt)
         observed = tick.basis_bps
         dislocation = observed - fv.fair_basis_bps
         funding_bps = tick.predicted_funding * 1e4
@@ -111,6 +115,16 @@ class RepricingDetector:
         else:  # carry
             if funding_bps < self.min_funding_bps:
                 reasons.append(f"funding {funding_bps:+.2f}<{self.min_funding_bps:.1f}bps")
+            elif funding_bps > 0:
+                # horyzont zwrotu kosztu: koszt round-trip (~20bps) musi się spłacić
+                # z funding w ≤N rozliczeń. Sam próg min_funding (0.1bps) przepuszczał
+                # wejścia, które spłacałyby prowizje przez ~60 dni — jeden flip
+                # reżimu w tym czasie i transakcja jest strukturalnie stratna.
+                payback = cost.total_bps / funding_bps
+                if payback > self.carry_max_payback_settles:
+                    reasons.append(
+                        f"payback kosztu {payback:.0f} rozliczeń > {self.carry_max_payback_settles:.0f} "
+                        f"(koszt {cost.total_bps:.1f}bps / funding {funding_bps:.2f}bps)")
             if observed < -self.basis_floor_bps:
                 reasons.append(f"basis {observed:+.1f} odwrócony (<−{self.basis_floor_bps:.0f})")
             edge_value = funding_bps
@@ -146,6 +160,11 @@ class RepricingDetector:
         if not isinstance(tick, MarketTick) or self._bus is None:
             return
         sig = self.evaluate(tick)
+        # FAIR_VALUE na szynę (audyt/storage): architektura deklaruje ten event,
+        # a bez publikacji "dlaczego bot uznał taki fair basis" ginęło z audytu.
+        if self.last_fair_value is not None:
+            await self._bus.publish(Event(EventType.FAIR_VALUE, sig.ts, self.SOURCE,
+                                          payload=self.last_fair_value))
         prev = self._last_state.get(tick.asset, SignalState.NO_TRADE)
 
         if sig.state == SignalState.EDGE_DETECTED:

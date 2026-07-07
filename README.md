@@ -71,12 +71,13 @@ python scripts/run_paper_live.py --mode live --cycles 60
 
 ### GUI (cockpit)
 
-GUI jest statyczne (`gui/` — od osobnego frontendu) i tylko renderuje dane z
-backendu. Domyślnie chodzi w trybie `mock` (baner SIMULATION). Aby podpiąć live:
+GUI jest statyczne (pliki w katalogu repo: `index.html`, `js/`, `styles.css`) i
+tylko renderuje dane z backendu. Domyślnie chodzi w trybie `mock` (baner
+SIMULATION). Aby podpiąć live:
 
 1. uruchom runner z GUI: `python scripts/run_paper_live.py --mode synthetic --watch`
-2. w `gui/js/config.js` ustaw `adapter: "ws"` (URL `ws://127.0.0.1:8765/gui`),
-3. otwórz `gui/index.html`.
+2. w `js/config.js` ustaw `adapter: "ws"` (URL `ws://127.0.0.1:8765/gui`),
+3. zaserwuj pliki: `python -m http.server 8080` i otwórz `http://127.0.0.1:8080/index.html`.
 
 Kontrakt danych: `ARCHITECTURE.md` §5 / `DATA_CONTRACT.md`. GUI nie podejmuje
 żadnych decyzji tradingowych — wysyła co najwyżej komendy operatora (kill/flatten).

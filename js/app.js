@@ -37,7 +37,13 @@
         state.signal[message.asset] = message;
         break;
       case "position":
-        state.positions.set(message.id, message);
+        // backend flaguje zamknięcie (closed: true) — usuwamy z tabeli zamiast
+        // nadpisywać, inaczej zamknięte pozycje wisiałyby jako otwarte
+        if (message.closed) {
+          state.positions.delete(message.id);
+        } else {
+          state.positions.set(message.id, message);
+        }
         break;
       case "order":
         state.orders.push({ ...message, ts: state.lastMessageAt });

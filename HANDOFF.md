@@ -9,7 +9,7 @@
 
 One Wish to **realny bot tradingowy**: delta-neutral **basis/funding carry** na
 Binance (long spot + short perp, inkasowanie funding). Backend Python, event-driven,
-**316 testów pytest zielonych**. Edge (carry) **zwalidowany na ~roku realnej historii
+**328 testów pytest zielonych**. Edge (carry) **zwalidowany na ~roku realnej historii
 funding (~+18%/rok delta-neutral po prowizjach)**. Bot poprawnie wchodzi w carry na
 realnych danych. Realny handel jest **domyślnie zablokowany** — jesteśmy w fazie
 paper/walidacji, przed transportem na testnecie i pilotem.
@@ -29,7 +29,7 @@ Folder roboczy: katalog repo (na GitHubie). Testy: `python -m pytest -q`.
   prowizje — naprawione).
 - **Tryb „dislocation"** (opcjonalny, do badań): wejście na perp-rich spike.
 
-## 2. Status — co działa (316 testów zielonych)
+## 2. Status — co działa (328 testów zielonych)
 
 Pełny pipeline event-driven (`backend/`):
 
@@ -106,7 +106,7 @@ backend/
                liquidation_risk (ryzyko likwidacji altów z cen)
 scripts/       study_funding, run_backtest, run_edge_validation, run_paper_live,
                record_market, record_liquidations, scan_universe, run_testnet_smoke
-tests/         pełna suita pytest (316)
+tests/         pełna suita pytest (328)
 Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md,
                CARRY_VERDICT.md, UNIVERSE_SCAN.md, DATA_CONTRACT.md, RUNBOOK.md, ten HANDOFF.md
 ```
@@ -114,7 +114,7 @@ Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md
 ## 6. Jak uruchomić
 
 ```
-python -m pytest -q                              # 316 testów
+python -m pytest -q                              # 328 testów
 python scripts/study_funding.py                  # werdykt carry na historii funding (natychmiast)
 python scripts/scan_universe.py --top 25         # ranking aktywów po carry
 python scripts/run_backtest.py                   # backtest carry vs scalp (synthetic)
@@ -333,6 +333,40 @@ Z przeglądów Codexa „survive live" — zrobione: P0 OrderManager, #4 kwantyz
   cenę ostatniego filla zamiast średniej ważonej (tylko informacyjnie); (d) nogi liczone
   jako N/spot vs N/perp → resztkowa delta ~basis (w tolerancji). Rekomendacja: (a) to
   najważniejsze — przerobić guard na drawdown NETTO (z unrealized) + realny rollover dnia.
+
+- ✅ **Audyt #2 (recenzja zewnętrzna) — WSZYSTKIE punkty naprawione:** właściciel
+  wkleił niezależny przegląd; każdy zarzut zweryfikowany w kodzie i potwierdzony:
+  1. **P0 close/flatten po cenie WEJŚCIA** — paper broker fill'uje po `req.price`,
+     więc cały ruch ceny od entry znikał z realized (PnL fabrykowany). Fix:
+     `close_pair`/`_flatten` przyjmują ceny rynkowe, `ExecutionEngine._close`
+     podaje ceny z ostatniego ticka (fallback do entry, gdy ceny brak).
+  2. **P0 milczący feed nie zatrzymywał bota** — STALE_FEED z adaptera powstaje
+     dopiero przy NASTĘPNYM ticku; przy pełnej ciszy nigdy. Fix: `Monitor.
+     start_heartbeat()` (task cykliczny) emituje EMERGENCY_STOP, gdy `is_stale()`;
+     runner startuje go w trybie live i zatrzymuje w finally.
+  3. **P1 raport/backtest ignorował unrealized otwartych pozycji** — carry celowo
+     TRZYMA, więc net był metodologicznie mylący. Fix: `build_report(..., marks=)`
+     + `DailyReport.unrealized`; `BacktestResult.final_unrealized`; net zawiera
+     mark-to-market (`ExecutionEngine.marks` property).
+  4. **P1 live futures close bez reduceOnly** — w hedge-mode BUY otworzyłby LONGA
+     zamiast domknąć shorta. Fix: `reduceOnly=true` dla PERP+CLOSE. Oraz **price=0
+     omijał limit nominału** (0×qty=0≤limit): submit odrzuca `price<=0`; smoke-test
+     wymaga `--price > 0`.
+  5. **P1 GUI nie usuwał zamkniętych pozycji** — POSITION_CLOSED wyglądał jak
+     otwarcie. Fix: kontrakt ma `closed: bool`; `js/app.js` robi delete zamiast set.
+  6. **Strategia: payback kosztu w carry** — próg min_funding 0.1bps przepuszczał
+     wejścia spłacające prowizje ~60 dni. Fix: `carry_max_payback_settles=30`
+     (koszt round-trip musi zwrócić się z funding w ≤30 rozliczeń = 10 dni @8h);
+     konfigurowalne.
+  7. **Drobne:** FAIR_VALUE publikowany na szynę (audyt); GUI assets 4→9 (config.js
+     + index.html select); README stare ścieżki `gui/` poprawione; deprecation
+     `utcfromtimestamp` → timezone-aware; **DB batch commit ticków** (co 25;
+     sygnały/fille/decyzje nadal commit natychmiast) — commit-per-event dusił
+     pipeline przy żywym feedzie.
+  Suita 316→**328** (12 nowych regresji). NIE zrobione z recenzji (świadomie):
+  refaktor EventBus na współbieżny (duża zmiana, sekwencyjność jest też gwarancją
+  porządku zdarzeń — batch commit DB adresuje realny koszt); min-hold w polityce
+  (EMA exit już tłumi churn; payback-gate tnie problem u źródła).
 
 **Zostało (buildable-now):**
 

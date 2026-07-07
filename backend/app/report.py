@@ -13,6 +13,7 @@ class DailyReport:
     realized: float = 0.0
     fees: float = 0.0
     funding: float = 0.0
+    unrealized: float = 0.0      # mark-to-market OTWARTYCH pozycji (ostatnie marki)
     net: float = 0.0
     open_positions: int = 0
 
@@ -29,21 +30,32 @@ class DailyReport:
             f"awaryjne stopy:    {c.get('EMERGENCY_STOP', 0)}",
             f"otwarte pozycje:   {self.open_positions}",
             f"PnL zrealizowany:  {self.realized:+.2f}$",
+            f"PnL niezrealiz.:   {self.unrealized:+.2f}$ (otwarte, mark-to-market)",
             f"prowizje:          {self.fees:.2f}$",
             f"funding:           {self.funding:+.2f}$",
             f"PnL NETTO:         {self.net:+.2f}$",
         ])
 
 
-def build_report(db: Database, book: PositionBook) -> DailyReport:
+def build_report(db: Database, book: PositionBook,
+                 marks: dict | None = None) -> DailyReport:
+    """`marks` = ostatnie znane (spot, perp) per aktywo. Carry celowo TRZYMA pozycje,
+    więc net bez mark-to-market otwartych pozycji byłby metodologicznie mylący —
+    ukrywałby wynik z basis/ruchu ceny na trzymanych parach."""
     counts = AuditTrail(db).summary()
-    net = book.realized_pnl - book.fees_paid + book.funding_collected
+    unrealized = 0.0
+    if marks:
+        for asset, p in book.positions.items():
+            if p.is_open and asset in marks:
+                unrealized += p.price_pnl(marks[asset][0], marks[asset][1])
+    net = book.realized_pnl - book.fees_paid + book.funding_collected + unrealized
     open_positions = sum(1 for p in book.positions.values() if p.is_open)
     return DailyReport(
         counts=counts,
         realized=book.realized_pnl,
         fees=book.fees_paid,
         funding=book.funding_collected,
+        unrealized=unrealized,
         net=net,
         open_positions=open_positions,
     )

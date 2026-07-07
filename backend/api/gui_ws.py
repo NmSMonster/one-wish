@@ -71,7 +71,10 @@ def event_to_gui(event: Event, marks: dict | None = None) -> dict | None:
         return {"type": "position", "id": p.id, "asset": p.asset.value, "spotQty": p.spot_qty,
                 "spotEntry": p.spot_entry, "perpQty": p.perp_qty, "perpEntry": p.perp_entry,
                 "netDelta": p.net_delta, "unrealizedPnl": p.price_pnl(mark[0], mark[1]),
-                "fundingAccrued": p.funding_accrued, "marginRatio": None, "openedTs": p.opened_ts}
+                "fundingAccrued": p.funding_accrued, "marginRatio": None, "openedTs": p.opened_ts,
+                # GUI musi wiedzieć, że pozycja jest ZAMKNIĘTA (usuwa z tabeli) —
+                # POSITION_CLOSED bez tej flagi wyglądał identycznie jak otwarcie.
+                "closed": t == EventType.POSITION_CLOSED or p.closed_ts is not None}
 
     if t in _ORDER_EVENTS and isinstance(p, OrderRequest):
         return {"type": "order", "id": p.client_order_id, "asset": p.asset.value,
@@ -176,7 +179,7 @@ class GuiApiServer:
             self._broadcast(self._risk_msg())
 
     def _status_msg(self) -> dict:
-        now = datetime.datetime.utcfromtimestamp(self._clock.now())
+        now = datetime.datetime.fromtimestamp(self._clock.now(), datetime.timezone.utc)
         return {"type": "status", "botState": self.bot_state, "connection": self.connection,
                 "latencyMs": round(self._latency_ms), "serverTimeUtc": now.strftime("%H:%M:%S")}
 

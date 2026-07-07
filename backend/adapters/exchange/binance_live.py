@@ -186,6 +186,12 @@ class BinanceLiveAdapter(ExchangeAdapter):
             "quantity": _fmt_qty(req.qty),
             "newClientOrderId": req.client_order_id,
         }
+        # Zamknięcie nogi perp MUSI redukować pozycję. Bez reduceOnly na koncie w
+        # hedge-mode BUY otworzyłby LONGA zamiast domknąć shorta — hedge by pękł,
+        # a bot myślałby, że jest flat. (One-way mode: reduceOnly też chroni przed
+        # przekręceniem pozycji na drugą stronę przy rozjechanym stanie.)
+        if req.leg == Leg.PERP and req.intent_action == "CLOSE":
+            params["reduceOnly"] = "true"
         loop = asyncio.get_event_loop()
         resp = await loop.run_in_executor(None, self._signed_request, "POST", base, path, params)
         return self._parse_order(resp, req)
@@ -193,6 +199,11 @@ class BinanceLiveAdapter(ExchangeAdapter):
     async def submit(self, req: OrderRequest) -> OrderResult:
         if not self._armed:
             return OrderResult(OrderStatus.REJECTED, [], "LIVE ZABLOKOWANY — adapter nieuzbrojony")
+        if req.price <= 0:
+            # bez ceny referencyjnej nie da się zweryfikować limitu nominału — a limit
+            # jest po to, żeby JEDEN błąd nie wysłał dużego zlecenia. Nie zgadujemy.
+            return OrderResult(OrderStatus.REJECTED, [],
+                               "brak ceny referencyjnej (price<=0) — limit nominału niesprawdzalny")
         notional = abs(req.price * req.qty)
         if notional > self.max_notional_usd:
             return OrderResult(OrderStatus.REJECTED, [],

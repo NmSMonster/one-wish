@@ -102,6 +102,35 @@ def test_carry_skips_inverted_basis():
     assert "odwrócony" in sig.reason
 
 
+def test_carry_blocks_when_cost_payback_too_slow():
+    """Regresja: sam próg min_funding (0.1bps) przepuszczał wejścia, którym spłata
+    kosztu round-trip (~20bps) z funding zajęłaby ~100 rozliczeń (~33 dni) — jeden
+    flip reżimu w tym czasie i transakcja jest strukturalnie stratna. Funding
+    0.2bps ≥ próg 0.1, ale payback > 30 rozliczeń → NO_TRADE."""
+    sig = make_carry_detector().evaluate(tick_with(2.0, funding=0.00002))
+    assert sig.state == SignalState.NO_TRADE
+    assert "payback" in sig.reason
+
+
+def test_carry_payback_horizon_configurable():
+    # ten sam tick przechodzi, gdy właściciel świadomie wydłuży horyzont
+    det = make_carry_detector(carry_max_payback_settles=200.0)
+    sig = det.evaluate(tick_with(2.0, funding=0.00002))
+    assert sig.state == SignalState.EDGE_DETECTED
+
+
+def test_fair_value_event_published_on_tick():
+    """FAIR_VALUE trafia na szynę (audyt „dlaczego taki fair basis") — architektura
+    deklarowała ten event, ale nikt go nie publikował."""
+    bus = EventBus()
+    fvs: list = []
+    bus.subscribe(EventType.FAIR_VALUE, lambda e: fvs.append(e.payload))
+    make_detector().attach(bus)
+    asyncio.run(bus.publish(Event(EventType.MARKET_TICK, 1.0, "t", payload=tick_with(50.0))))
+    assert fvs and fvs[0].asset.value == "BTC"
+    assert hasattr(fvs[0], "fair_basis_bps")
+
+
 def test_edge_then_lost_transition_emits_events():
     bus = EventBus()
     captured: list = []

@@ -23,9 +23,15 @@ log = logging.getLogger("onewish.db")
 
 
 class Database:
-    def __init__(self, path: str = ":memory:") -> None:
+    def __init__(self, path: str = ":memory:", *, tick_commit_every: int = 25) -> None:
         self._conn = sqlite3.connect(path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
+        # Commit per event dusi pipeline przy żywym feedzie (fsync na każdy tick).
+        # Ticki batchujemy (co N); WSZYSTKO inne (sygnały, fille, decyzje, PnL)
+        # commitujemy natychmiast — to są dane decyzyjne, ticki są odtwarzalne.
+        # Odczyty na tym samym połączeniu widzą niezcommitowane wiersze (bez zmian).
+        self.tick_commit_every = max(1, tick_commit_every)
+        self._ticks_pending = 0
         self._init_schema()
 
     def _init_schema(self) -> None:
@@ -87,7 +93,14 @@ class Database:
                 self.record_fill(p)
             elif event.type == EventType.PNL_UPDATE and isinstance(p, PnLSnapshot):
                 self.record_pnl(p)
-            self._conn.commit()
+            if event.type == EventType.MARKET_TICK:
+                self._ticks_pending += 1
+                if self._ticks_pending >= self.tick_commit_every:
+                    self._conn.commit()
+                    self._ticks_pending = 0
+            else:
+                self._conn.commit()
+                self._ticks_pending = 0
         except Exception:  # noqa: BLE001
             log.exception("Nie udało się zapisać eventu %s", event.type)
 

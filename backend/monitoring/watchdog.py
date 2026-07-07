@@ -3,11 +3,16 @@
 Niezależnie od Risk Managera pilnuje twardych warunków awaryjnych i emituje
 EMERGENCY_STOP (który kill-uje Risk Managera i każe Execution domknąć pozycje):
 - przekroczony dzienny limit straty zrealizowanej,
-- (opcjonalnie) zamrożony feed danych.
+- zamrożony feed danych — DWIE ścieżki: STALE_FEED z adaptera (luka między
+  tickami, wykrywana przy NASTĘPNYM ticku) oraz heartbeat (własny task), który
+  łapie przypadek, gdy feed po prostu MILKNIE i następny tick nigdy nie przyjdzie
+  — wtedy adapter nie ma okazji nic wyemitować i bez heartbeatu bot wisiałby
+  z otwartymi pozycjami na martwych danych.
 EMERGENCY_STOP emitujemy tylko raz, żeby nie zalać szyny.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from ..core.bus import EventBus
@@ -29,6 +34,7 @@ class Monitor:
         self._clock = clock or RealClock()
         self._last_tick_wall: float | None = None
         self._stopped = False
+        self._hb_task: asyncio.Task | None = None
 
     def attach(self, bus: EventBus) -> None:
         self._bus = bus
@@ -65,3 +71,28 @@ class Monitor:
     def is_stale(self, now: float | None = None) -> bool:
         now = now if now is not None else self._clock.now()
         return self._last_tick_wall is not None and (now - self._last_tick_wall) > self.stale_after_s
+
+    # -- heartbeat: aktywna detekcja MILCZĄCEGO feedu ------------------------ #
+    def start_heartbeat(self, interval_s: float = 1.0) -> asyncio.Task:
+        """Uruchamia task cyklicznie sprawdzający świeżość feedu. Konieczny w live:
+        STALE_FEED z adaptera powstaje dopiero przy następnym ticku — gdy źródło
+        zamilknie całkiem, tylko heartbeat wyemituje EMERGENCY_STOP (flatten+kill)."""
+        self._hb_task = asyncio.create_task(self._heartbeat(interval_s))
+        return self._hb_task
+
+    def stop_heartbeat(self) -> None:
+        if self._hb_task is not None:
+            self._hb_task.cancel()
+            self._hb_task = None
+
+    async def _heartbeat(self, interval_s: float) -> None:
+        try:
+            while not self._stopped:
+                if self._bus is not None and self.is_stale():
+                    gap = self._clock.now() - (self._last_tick_wall or 0.0)
+                    await self._emergency(self._clock.now(),
+                                          f"feed milczy {gap:.0f}s > {self.stale_after_s:.0f}s (heartbeat)")
+                    return                      # emergency raz; task kończy pracę
+                await asyncio.sleep(interval_s)
+        except asyncio.CancelledError:
+            pass

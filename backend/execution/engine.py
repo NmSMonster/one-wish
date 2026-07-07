@@ -84,12 +84,21 @@ class ExecutionEngine:
                          "reason": "niepełna para — kompensacja (flatten)"}))
         await self._emit_pnl(ts)
 
+    @property
+    def marks(self) -> dict:
+        """Ostatnie znane ceny (spot, perp) per aktywo — do mark-to-market raportów."""
+        return dict(self._marks)
+
     async def _close(self, asset) -> None:
         if not self.book.is_open(asset):
             return
         ts = self._clock.now()
         pos = self.book.position(asset)
-        await self._om.close_pair(asset)
+        # zamknięcie po CENIE RYNKOWEJ z ostatniego ticka — nie po cenie wejścia
+        tick = self._ticks.get(asset)
+        await self._om.close_pair(asset,
+                                  spot_px=tick.spot if tick is not None else None,
+                                  perp_px=tick.perp if tick is not None else None)
         if not self.book.is_open(asset) and self._bus:
             await self._bus.publish(Event(EventType.POSITION_CLOSED, ts, self.SOURCE, payload=pos))
         await self._emit_pnl(ts)

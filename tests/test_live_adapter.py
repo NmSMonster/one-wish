@@ -65,6 +65,44 @@ def test_notional_limit_enforced_even_when_armed():
     assert "nominał" in res.reason
 
 
+def test_zero_price_rejected_notional_unverifiable():
+    """Regresja: price=0 omijał limit nominału (0×qty = 0 ≤ limit), więc dowolnie
+    duże zlecenie przechodziło kontrolę. Bez ceny referencyjnej — odrzucamy."""
+    a = _armed(testnet=True, max_notional=5.0)
+    res = asyncio.run(a.submit(_req(notional_price=0.0, qty=1_000_000.0)))
+    assert res.status == OrderStatus.REJECTED
+    assert "price<=0" in res.reason
+
+
+def test_perp_close_sends_reduce_only():
+    """Regresja: zamknięcie nogi perp MUSI iść z reduceOnly — w hedge-mode BUY bez
+    tej flagi otworzyłby LONGA zamiast domknąć shorta (hedge pęka po cichu)."""
+    a = _armed(testnet=True)
+    captured = {}
+
+    def fake(method, base, path, params):
+        captured.update(params=params)
+        return {"status": "FILLED", "executedQty": "0.10", "avgPrice": "100.0"}
+    a._signed_request = fake
+
+    close_req = OrderRequest("c2", Asset.BTC, Leg.PERP, Side.BUY, OrderType.MARKET,
+                             100.0, 0.1, 1.0, "CLOSE")
+    asyncio.run(a.submit(close_req))
+    assert captured["params"]["reduceOnly"] == "true"
+
+    # OPEN nie może mieć reduceOnly (odrzuciłby otwarcie shorta)
+    open_req = OrderRequest("c3", Asset.BTC, Leg.PERP, Side.SELL, OrderType.MARKET,
+                            100.0, 0.1, 1.0, "OPEN")
+    asyncio.run(a.submit(open_req))
+    assert "reduceOnly" not in captured["params"]
+
+    # spot CLOSE też bez reduceOnly (to parametr futures)
+    spot_close = OrderRequest("c4", Asset.BTC, Leg.SPOT, Side.SELL, OrderType.MARKET,
+                              100.0, 0.1, 1.0, "CLOSE")
+    asyncio.run(a.submit(spot_close))
+    assert "reduceOnly" not in captured["params"]
+
+
 # -- transport na testnecie (stub _signed_request — zero sieci) -------------- #
 def test_endpoints_select_testnet_vs_mainnet():
     t = BinanceLiveAdapter(testnet=True)

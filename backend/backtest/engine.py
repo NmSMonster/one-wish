@@ -31,6 +31,7 @@ class BacktestResult:
     final_realized: float
     final_fees: float
     final_funding: float
+    final_unrealized: float      # mark-to-market pozycji otwartych na końcu danych
     final_net: float
 
     def summary(self) -> str:
@@ -49,6 +50,7 @@ class BacktestResult:
             f"max drawdown:     {m.max_drawdown:.2f}$",
             f"funding zebrany:  {self.final_funding:+.2f}$",
             f"prowizje:         {self.final_fees:.2f}$",
+            f"PnL niezrealiz.:  {self.final_unrealized:+.2f}$ (otwarte na końcu)",
             f"PnL NETTO:        {self.final_net:+.2f}$",
         ])
 
@@ -107,6 +109,14 @@ class Backtester:
         avg_edge = (sum(collector.signal_edges) / len(collector.signal_edges)
                     if collector.signal_edges else 0.0)
 
+        # mark-to-market pozycji wciąż otwartych na ostatnim ticku danych — carry
+        # celowo trzyma pozycje, więc net bez tego zaniżałby/ukrywał wynik z basis.
+        marks = pipe.execution.marks
+        unrealized = 0.0
+        for asset, p in pipe.book.positions.items():
+            if p.is_open and asset in marks:
+                unrealized += p.price_pnl(marks[asset][0], marks[asset][1])
+
         return BacktestResult(
             ticks=ticks,
             signals=len(collector.signal_edges),
@@ -118,5 +128,7 @@ class Backtester:
             final_realized=pipe.book.realized_pnl,
             final_fees=pipe.book.fees_paid,
             final_funding=pipe.book.funding_collected,
-            final_net=pipe.book.realized_pnl - pipe.book.fees_paid + pipe.book.funding_collected,
+            final_unrealized=unrealized,
+            final_net=(pipe.book.realized_pnl - pipe.book.fees_paid
+                       + pipe.book.funding_collected + unrealized),
         )

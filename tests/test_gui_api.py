@@ -50,6 +50,17 @@ def test_translate_position_with_marks():
     assert msg["type"] == "position"
     assert msg["netDelta"] == pytest.approx(0.0)
     assert msg["unrealizedPnl"] == pytest.approx(0.0)  # delta-neutral
+    assert msg["closed"] is False                       # otwarta → GUI trzyma w tabeli
+
+
+def test_translate_position_closed_flag_removes_from_gui():
+    """Regresja: POSITION_CLOSED bez flagi wyglądał w GUI identycznie jak otwarcie —
+    zamknięte pozycje wisiały w tabeli jako otwarte. GUI usuwa po `closed: true`."""
+    pos = Position(id="p", asset=Asset.BTC, spot_qty=0.0, spot_entry=100.0,
+                   perp_qty=0.0, perp_entry=100.0, closed_ts=2.0)
+    msg = event_to_gui(Event(EventType.POSITION_CLOSED, 2.0, "e", payload=pos))
+    assert msg["type"] == "position"
+    assert msg["closed"] is True
 
 
 def test_translate_order_and_fill():

@@ -113,3 +113,37 @@ def test_full_pipeline_opens_closes_and_books_pnl():
 
     rec = engine.reconcile()
     assert "open_positions" in rec and "open_orders" in rec
+
+
+def test_engine_closes_at_current_market_price():
+    """Regresja P0 (poziom silnika): CLOSE musi iść po cenie z OSTATNIEGO ticka,
+    nie po cenie wejścia. Wejście @60000/60000; rynek przesuwa się na spot 66000 /
+    perp 63000 (konwergencja basis na korzyść pary). Zamknięcie po rynku daje
+    realized = +6000 (spot) − 3000 (perp) = +3000. Entry-close dałby 0."""
+    from dataclasses import replace
+
+    from backend.core.events import Event
+    from backend.core.types import RiskDecision, TradeIntent
+    from tests.test_repricing import tick_with
+
+    bus = EventBus()
+    book = PositionBook()
+    engine = ExecutionEngine(PaperBrokerAdapter(slippage_bps=0.0), book, clock=SimClock())
+    engine.attach(bus)
+    t0 = tick_with(0.0)                        # spot=perp=60000
+
+    async def run():
+        await bus.publish(Event(EventType.MARKET_TICK, 1.0, "s", payload=t0))
+        await bus.publish(Event(EventType.RISK_APPROVED, 1.0, "r", payload={
+            "intent": TradeIntent(Asset.BTC, 1.0, "OPEN", 60_000.0, 5.0),
+            "decision": RiskDecision(approved=True, ts=1.0)}))
+        assert book.is_open(Asset.BTC)
+        moved = replace(t0, ts=2.0, spot=66_000.0, perp=63_000.0, index=66_000.0)
+        await bus.publish(Event(EventType.MARKET_TICK, 2.0, "s", payload=moved))
+        await bus.publish(Event(EventType.RISK_APPROVED, 2.0, "r", payload={
+            "intent": TradeIntent(Asset.BTC, 2.0, "CLOSE", 0.0, 0.0),
+            "decision": RiskDecision(approved=True, ts=2.0)}))
+
+    asyncio.run(run())
+    assert not book.is_open(Asset.BTC)
+    assert abs(book.realized_pnl - 3000.0) < 1e-6

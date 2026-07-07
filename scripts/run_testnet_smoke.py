@@ -15,7 +15,7 @@ https://testnet.binancefuture.com (futures). To NIE są klucze mainnet.
 
 Przykład:
     ONEWISH_BINANCE_KEY=... ONEWISH_BINANCE_SECRET=... \
-      python scripts/run_testnet_smoke.py --qty 0.001 --max-notional 200 --yes
+      python scripts/run_testnet_smoke.py --qty 0.001 --price 60000 --max-notional 200 --yes
 """
 from __future__ import annotations
 
@@ -68,14 +68,18 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="One Wish — smoke-test transportu (TESTNET)")
     ap.add_argument("--asset", default="BTC", choices=["BTC", "ETH", "SOL", "XRP"])
     ap.add_argument("--qty", type=float, default=0.001, help="ilość w jednostkach bazowych")
-    ap.add_argument("--price", type=float, default=0.0,
-                    help="cena referencyjna do limitu nominału (0 = pomiń kontrolę po cenie)")
+    ap.add_argument("--price", type=float, required=True,
+                    help="cena referencyjna do limitu nominału (WYMAGANA > 0; "
+                         "adapter odrzuca zlecenia bez ceny — limit musi być sprawdzalny)")
     ap.add_argument("--max-notional", type=float, default=200.0)
     ap.add_argument("--yes", action="store_true", help="wymagane potwierdzenie uruchomienia")
     args = ap.parse_args()
 
     if not args.yes:
         print("Dopisz --yes, żeby potwierdzić wysyłkę zleceń na TESTNET.")
+        raise SystemExit(1)
+    if args.price <= 0:
+        print("--price musi być > 0 (cena referencyjna do limitu nominału).")
         raise SystemExit(1)
     if not (os.environ.get("ONEWISH_BINANCE_KEY") and os.environ.get("ONEWISH_BINANCE_SECRET")):
         print("Brak kluczy TESTNET w env (ONEWISH_BINANCE_KEY/SECRET).")

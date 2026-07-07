@@ -197,6 +197,28 @@ def test_close_pair_flattens():
     assert not om.book.is_open(Asset.BTC)
 
 
+def test_close_pair_uses_market_price_not_entry():
+    """Regresja P0: zamknięcie po cenie WEJŚCIA fałszowało PnL — paper broker
+    fill'uje po req.price, więc cały ruch ceny od entry znikał z realized.
+    Scenariusz: wejście @100/100, rynek: spot 130 / perp 120 (basis się zbiegł
+    z premii do dyskonta). Zamknięcie po rynku → realized = +30 (spot) − 20 (perp)
+    = +10. Ze starym bugiem (entry-close) realized byłby 0."""
+    om = _om(PaperBrokerAdapter(slippage_bps=0.0))
+    asyncio.run(om.open_pair(Asset.BTC, 1.0, 1.0, 100.0, 100.0))
+    asyncio.run(om.close_pair(Asset.BTC, spot_px=130.0, perp_px=120.0))
+    assert not om.book.is_open(Asset.BTC)
+    assert abs(om.book.realized_pnl - 10.0) < 1e-9
+
+
+def test_close_pair_without_price_falls_back_to_entry():
+    """Bez podanych cen (np. testy jednostkowe) — fallback do entry, jak dotąd."""
+    om = _om(PaperBrokerAdapter(slippage_bps=0.0))
+    asyncio.run(om.open_pair(Asset.BTC, 1.0, 1.0, 100.0, 100.0))
+    asyncio.run(om.close_pair(Asset.BTC))
+    assert not om.book.is_open(Asset.BTC)
+    assert abs(om.book.realized_pnl) < 1e-9
+
+
 def test_unique_coids_no_duplicates_on_retry():
     om = _om(PaperBrokerAdapter(reject_leg=Leg.PERP), max_attempts=3)
     asyncio.run(om.open_pair(Asset.BTC, 0.01, 0.01, 100.0, 100.0))

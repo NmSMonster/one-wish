@@ -4,5 +4,6 @@ window.OneWishConfig = {
   // "ws" = realny backend WebSocket.
   adapter: "mock",
   wsUrl: "ws://127.0.0.1:8765/gui",
-  assets: ["BTC", "ETH", "SOL", "XRP"],
+  // pełne uniwersum backendu (backend/core/types.py: ASSETS)
+  assets: ["BTC", "ETH", "SOL", "XRP", "DOGE", "ZEC", "VELVET", "TAC", "HYPE"],
 };
