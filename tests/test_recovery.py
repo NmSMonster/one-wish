@@ -9,7 +9,7 @@ from backend.core.bus import EventBus
 from backend.core.clock import SimClock
 from backend.core.events import Event, EventType
 from backend.core.types import Asset, Fill, Leg, Side
-from backend.execution import restore_book
+from backend.execution import PositionBook, restore_book
 from backend.storage import Database
 from tests.test_repricing import tick_with
 from tests.test_runner import _generous
