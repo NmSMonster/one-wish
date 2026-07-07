@@ -156,6 +156,25 @@ class Database:
         )
         return [dict(r) for r in cur.fetchall()]
 
+    def fills_all(self) -> list[dict]:
+        """Wszystkie fille chronologicznie — podstawa odbudowy księgi po restarcie."""
+        cur = self._conn.execute("SELECT * FROM fills ORDER BY ts ASC, rowid ASC")
+        return [dict(r) for r in cur.fetchall()]
+
+    def funding_events(self) -> list[dict]:
+        """Zdarzenia FUNDING_ACCRUED (ts + payload {asset, amount}) chronologicznie."""
+        cur = self._conn.execute(
+            "SELECT ts, payload FROM events WHERE type=? ORDER BY ts ASC, rowid ASC",
+            (EventType.FUNDING_ACCRUED.value,))
+        out = []
+        for r in cur.fetchall():
+            try:
+                payload = json.loads(r["payload"]) if r["payload"] else {}
+            except (ValueError, TypeError):
+                continue
+            out.append({"ts": r["ts"], **payload})
+        return out
+
     def all_events(self) -> list[dict]:
         """Wszystkie eventy w kolejności wystąpienia (ts, potem kolejność wstawienia),
         z payloadem sparsowanym z JSON. Podstawa audytu/replay (M8)."""

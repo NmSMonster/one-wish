@@ -105,6 +105,11 @@ class RiskManager:
         self.exposure[asset] = self.exposure.get(asset, 0.0) + notional_usd
         self.trades_today += 1
 
+    def restore_exposure(self, asset: Asset, notional_usd: float) -> None:
+        """Rejestracja ekspozycji ODZYSKANEJ po restarcie — bez podbijania
+        trades_today (to nie jest dzisiejsza transakcja, tylko trzymany stan)."""
+        self.exposure[asset] = self.exposure.get(asset, 0.0) + notional_usd
+
     def register_close(self, asset: Asset) -> None:
         self.exposure.pop(asset, None)
 

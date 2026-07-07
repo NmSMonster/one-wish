@@ -9,7 +9,7 @@
 
 One Wish to **realny bot tradingowy**: delta-neutral **basis/funding carry** na
 Binance (long spot + short perp, inkasowanie funding). Backend Python, event-driven,
-**333 testów pytest zielonych**. Edge (carry) **zwalidowany na ~roku realnej historii
+**338 testów pytest zielonych**. Edge (carry) **zwalidowany na ~roku realnej historii
 funding (~+18%/rok delta-neutral po prowizjach)**. Bot poprawnie wchodzi w carry na
 realnych danych. Realny handel jest **domyślnie zablokowany** — jesteśmy w fazie
 paper/walidacji, przed transportem na testnecie i pilotem.
@@ -29,7 +29,7 @@ Folder roboczy: katalog repo (na GitHubie). Testy: `python -m pytest -q`.
   prowizje — naprawione).
 - **Tryb „dislocation"** (opcjonalny, do badań): wejście na perp-rich spike.
 
-## 2. Status — co działa (333 testów zielonych)
+## 2. Status — co działa (338 testów zielonych)
 
 Pełny pipeline event-driven (`backend/`):
 
@@ -106,7 +106,7 @@ backend/
                liquidation_risk (ryzyko likwidacji altów z cen)
 scripts/       study_funding, run_backtest, run_edge_validation, run_paper_live,
                record_market, record_liquidations, scan_universe, run_testnet_smoke
-tests/         pełna suita pytest (333)
+tests/         pełna suita pytest (338)
 Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md,
                CARRY_VERDICT.md, UNIVERSE_SCAN.md, DATA_CONTRACT.md, RUNBOOK.md, ten HANDOFF.md
 ```
@@ -114,7 +114,7 @@ Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md
 ## 6. Jak uruchomić
 
 ```
-python -m pytest -q                              # 333 testów
+python -m pytest -q                              # 338 testów
 python scripts/study_funding.py                  # werdykt carry na historii funding (natychmiast)
 python scripts/scan_universe.py --top 25         # ranking aktywów po carry
 python scripts/run_backtest.py                   # backtest carry vs scalp (synthetic)
@@ -384,6 +384,20 @@ Z przeglądów Codexa „survive live" — zrobione: P0 OrderManager, #4 kwantyz
      deltę ~basis na każdej parze.
   Suita 328→**333**. Tym samym WSZYSTKIE punkty z obu audytów (własnego i
   zewnętrznego) są zamknięte.
+
+- ✅ **CI + lint (poziom enterprise):** `.github/workflows/ci.yml` — każdy push/PR
+  odpala pełną suitę pytest + ruff na Pythonie 3.11 i 3.12. `ruff.toml` (E/W/F,
+  bez E501). Naprawione znalezione problemy lintu (nieużywane importy, `l` → `lev`).
+- ✅ **Crash-safe recovery (odzysk po padzie):** księga żyła w RAM, DB było
+  `:memory:` — pad procesu z otwartymi pozycjami = bot po restarcie NIE WIE
+  o własnym hedge'u na giełdzie. Teraz: `backend/execution/recovery.py::
+  restore_book(db, book)` — chronologiczny replay trwałego audit trailu (tabela
+  `fills` + eventy FUNDING_ACCRUED) przez TĘ SAMĄ logikę księgowania, więc stan po
+  odbudowie = stan sprzed padu (test-inwariant). Runner: przy plikowej DB odbudowuje
+  `pipe.book`, przywraca ekspozycję ryzyka (`restore_exposure` — bez podbijania
+  trades_today) i nadzór polityki (`restore_holding` — nie dubluje wejścia, pilnuje
+  wyjścia). `run_paper_live --db PATH`; live domyślnie `data/onewish_live.db`
+  (synthetic dalej `:memory:`). Nieznane aktywa w starej DB pomijane z logiem.
 
 **Zostało (buildable-now):**
 

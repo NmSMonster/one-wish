@@ -43,7 +43,16 @@ def main() -> None:
     ap.add_argument("--funding-weighted", action="store_true",
                     help="Tier A: waż nominał pozycji siłą forward funding zamiast płaskiej "
                          "kwoty na parę (więcej kapitału do wyżej płacących aktywów).")
+    ap.add_argument("--db", default=None,
+                    help="ścieżka pliku sqlite (audit + crash-safe recovery). Domyślnie: "
+                         "live → data/onewish_live.db (restart odzyskuje pozycje), "
+                         "synthetic → :memory:.")
     args = ap.parse_args()
+
+    if args.db is None:
+        args.db = os.path.join("data", "onewish_live.db") if args.mode == "live" else ":memory:"
+    if args.db != ":memory:":
+        os.makedirs(os.path.dirname(os.path.abspath(args.db)), exist_ok=True)
 
     risk = RiskConfig.from_yaml(_RISK_YAML) if os.path.exists(_RISK_YAML) else RiskConfig()
 
@@ -57,7 +66,10 @@ def main() -> None:
         risk_config=risk,
         budget_pln=args.budget_pln,
         funding_weighted=args.funding_weighted,
+        db_path=args.db,
     )
+    if args.db != ":memory:":
+        print(f"Audit/recovery DB: {args.db} (restart odzyskuje otwarte pozycje)")
     if args.budget_pln is not None:
         print(f"Forward paper-trade: budżet {args.budget_pln:.0f} zł ≈ {app.budget_usd:.2f}$ "
               f"(cap ekspozycji {app.risk_config.max_total_exposure_usd:.2f}$). Egzekucja PAPIEROWA.")

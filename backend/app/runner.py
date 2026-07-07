@@ -101,6 +101,17 @@ class OneWishApp:
         pipe = Pipeline(bus, risk_config=self.risk_config, notional_usd=self.notional_usd,
                         broker=broker, clock=clock, funding_weighted=self.funding_weighted)
 
+        if self.db_path != ":memory:":
+            # crash-safe restart: odbuduj księgę z trwałego audit trailu (fille +
+            # funding) i przywróć ekspozycję ryzyka — bot po padzie wie o swoich
+            # pozycjach (margin watchdog / wyjścia znów je nadzorują).
+            from ..execution import restore_book
+            restore_book(db, pipe.book)
+            for asset, pos in pipe.book.positions.items():
+                if pos.is_open:
+                    pipe.risk.restore_exposure(asset, abs(pos.spot_qty * pos.spot_entry))
+                    pipe.policy.restore_holding(asset)   # nadzór wyjść nad odzyskaną parą
+
         monitor = Monitor(bus, max_daily_loss_usd=self.risk_config.max_daily_loss_usd, clock=clock)
         monitor.attach(bus)
         if self.mode == "live":

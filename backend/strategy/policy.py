@@ -43,6 +43,11 @@ class StrategyPolicy:
         self._inflight: set = set()
         self._closing: set = set()
 
+    def restore_holding(self, asset) -> None:
+        """Rejestruje pozycję ODZYSKANĄ po restarcie: polityka nie dubluje wejścia
+        i znów nadzoruje wyjście (flip funding EMA / stop basis) dla tej pary."""
+        self._holding.add(asset)
+
     def attach(self, bus: EventBus) -> None:
         self._bus = bus
         bus.subscribe(EventType.EDGE_DETECTED, self._on_edge)
