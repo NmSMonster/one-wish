@@ -142,13 +142,15 @@ class OneWishApp:
                 gui_server = None
 
         adapter = MarketDataAdapter(self._build_source(), bus, clock)
+        session_rowid = db.max_event_rowid()   # granica sesji: raport liczy tylko TĘ sesję
         try:
             await adapter.run()
         finally:
             monitor.stop_heartbeat()
             # raport z mark-to-market otwartych pozycji (ostatnie znane ceny) — bez
             # tego net udawałby, że trzymane pozycje nie mają wyniku
-            self.report = build_report(db, pipe.book, marks=pipe.execution.marks)
+            self.report = build_report(db, pipe.book, marks=pipe.execution.marks,
+                                       since_rowid=session_rowid)
             if self.telemetry is not None:
                 snap = self.telemetry.snapshot()
                 log.info("Cost telemetry (shadow): slip_spot=%.2fbps slip_perp=%.2fbps "

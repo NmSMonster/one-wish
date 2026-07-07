@@ -100,6 +100,34 @@ def test_restart_recovers_positions_end_to_end(tmp_path):
     db2.close()
 
 
+def test_report_counts_are_per_session_on_persistent_db(tmp_path):
+    """Regresja: na trwałej bazie zliczenia raportu sumowały eventy WSZYSTKICH
+    poprzednich sesji („wejścia: 6" w sesji, która nic nie otwierała). Granicą
+    sesji jest rowid (ts nie rozdziela — SimClock każdej sesji startuje od zera)."""
+    from backend.app.report import build_report
+
+    path = str(tmp_path / "onewish.db")
+    # sesja 1: zapisuje eventy
+    bus1 = EventBus()
+    db1 = Database(path)
+    db1.attach(bus1)
+    asyncio.run(bus1.publish(Event(EventType.MARKET_TICK, 1000.0, "s", payload=tick_with(60.0))))
+    db1.close()
+
+    # sesja 2: granica = max rowid PRZED nowymi eventami
+    db2 = Database(path)
+    boundary = db2.max_event_rowid()
+    bus2 = EventBus()
+    db2.attach(bus2)
+    asyncio.run(bus2.publish(Event(EventType.MARKET_TICK, 1000.0, "s", payload=tick_with(60.0))))
+
+    rep_session = build_report(db2, PositionBook(), since_rowid=boundary)
+    rep_all = build_report(db2, PositionBook())
+    assert rep_session.counts.get("MARKET_TICK", 0) == 1     # tylko ta sesja
+    assert rep_all.counts.get("MARKET_TICK", 0) == 2         # cała historia pliku
+    db2.close()
+
+
 def test_restore_into_fresh_book_matches_original(tmp_path):
     """Inwariant: replay audit trailu odtwarza DOKŁADNIE stan księgi sprzed padu
     (pozycje, realized, fees, funding) — bo używa tej samej logiki księgowania."""

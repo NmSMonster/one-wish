@@ -156,6 +156,20 @@ class Database:
         )
         return [dict(r) for r in cur.fetchall()]
 
+    def max_event_rowid(self) -> int:
+        """Najwyższy rowid tabeli events — marker granicy sesji na trwałej bazie
+        (rowid jest monotoniczny per plik; ts NIE rozdziela sesji, bo SimClock
+        każdej sesji syntetycznej zaczyna od zera)."""
+        cur = self._conn.execute("SELECT COALESCE(MAX(rowid), 0) AS m FROM events")
+        return int(cur.fetchone()["m"])
+
+    def event_counts(self, since_rowid: int = 0) -> dict:
+        """Zliczenia eventów per typ, tylko wiersze wstawione PO `since_rowid`."""
+        cur = self._conn.execute(
+            "SELECT type, COUNT(*) AS n FROM events WHERE rowid > ? GROUP BY type",
+            (since_rowid,))
+        return {r["type"]: int(r["n"]) for r in cur.fetchall()}
+
     def fills_all(self) -> list[dict]:
         """Wszystkie fille chronologicznie — podstawa odbudowy księgi po restarcie."""
         cur = self._conn.execute("SELECT * FROM fills ORDER BY ts ASC, rowid ASC")

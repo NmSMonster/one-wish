@@ -71,8 +71,9 @@ class AuditTrail:
         parts.append("→ WSZEDŁ (fill)" if fill else "→ brak wejścia")
         return " | ".join(parts)
 
-    def summary(self) -> dict:
-        counts: dict[str, int] = {}
-        for e in self.db.all_events():
-            counts[e["type"]] = counts.get(e["type"], 0) + 1
-        return counts
+    def summary(self, since_rowid: int = 0) -> dict:
+        """Zliczenia eventów per typ. `since_rowid` ogranicza do bieżącej sesji —
+        na TRWAŁEJ bazie (crash-safe recovery) eventy kumulują się między sesjami
+        i raport bez filtra pokazywałby liczby z całej historii pliku. Rowid (nie
+        ts), bo SimClock każdej sesji syntetycznej zaczyna czas od zera."""
+        return self.db.event_counts(since_rowid)

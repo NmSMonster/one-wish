@@ -38,11 +38,13 @@ class DailyReport:
 
 
 def build_report(db: Database, book: PositionBook,
-                 marks: dict | None = None) -> DailyReport:
+                 marks: dict | None = None, since_rowid: int = 0) -> DailyReport:
     """`marks` = ostatnie znane (spot, perp) per aktywo. Carry celowo TRZYMA pozycje,
     więc net bez mark-to-market otwartych pozycji byłby metodologicznie mylący —
-    ukrywałby wynik z basis/ruchu ceny na trzymanych parach."""
-    counts = AuditTrail(db).summary()
+    ukrywałby wynik z basis/ruchu ceny na trzymanych parach.
+    `since_rowid` = granica bieżącej sesji: na trwałej bazie (recovery) zliczenia
+    bez filtra sumowałyby eventy WSZYSTKICH poprzednich sesji."""
+    counts = AuditTrail(db).summary(since_rowid=since_rowid)
     unrealized = 0.0
     if marks:
         for asset, p in book.positions.items():
