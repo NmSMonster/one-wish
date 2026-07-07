@@ -1,0 +1,28 @@
+# CI One Wish — każdy push/PR musi przejść pełną suitę i lint.
+# Bot handluje (docelowo) prawdziwymi pieniędzmi: czerwony build = nie dotykamy live.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Zależności
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt ruff
+      - name: Lint (ruff)
+        run: ruff check backend/ tests/ scripts/
+      - name: Testy (pytest)
+        run: python -m pytest -q

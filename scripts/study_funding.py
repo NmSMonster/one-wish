@@ -261,7 +261,7 @@ składnik. Pełny obraz da replay nagranych ticków (`run_backtest.py --data`).
 """
     with open(os.path.join(ROOT, "CARRY_VERDICT.md"), "w", encoding="utf-8") as fh:
         fh.write(doc)
-    print(f"\nZapisano werdykt -> CARRY_VERDICT.md")
+    print("\nZapisano werdykt -> CARRY_VERDICT.md")
 
 
 if __name__ == "__main__":

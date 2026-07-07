@@ -1,0 +1,10 @@
+# Lint One Wish — brama jakości w CI (styl spójny z istniejącym kodem).
+line-length = 110
+target-version = "py311"
+
+[lint]
+# E/W = pycodestyle, F = pyflakes (martwy kod, nieużywane importy, literówki nazw)
+select = ["E", "W", "F"]
+# E501 świadomie poza bramą: długie, opisowe komentarze PL są ważniejsze niż sztywny
+# limit; line-length i tak pilnuje rozsądku przy nowym kodzie.
+ignore = ["E501"]

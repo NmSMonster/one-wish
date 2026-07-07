@@ -5,7 +5,6 @@ from backend.adapters.market import MarketDataAdapter, SyntheticSource
 from backend.core.bus import EventBus
 from backend.core.clock import SimClock
 from backend.core.events import EventType
-from backend.core.types import Asset
 from backend.model import FairValueModel
 from tests.test_core import make_tick
 

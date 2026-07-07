@@ -63,7 +63,7 @@ def main() -> None:
     cross = DeltaNeutralCrossStress(perp_leverage=max(levs), maintenance_margin_rate=args.mmr,
                                     spot_haircut=args.haircut)
 
-    lev_hdr = " ".join(f"{l:.0f}x" for l in levs)
+    lev_hdr = " ".join(f"{lev:.0f}x" for lev in levs)
     header = (f"{'asset':6} {'bary':>5} {'najg.okno':>10}  ISOLATED likw? [{lev_hdr}]  "
               f"CROSS przeżywa?  bufor-basis")
     print(f"RYZYKO SHORT — realne ceny (interwał {args.interval}, okno {args.window} bar, "
@@ -72,7 +72,7 @@ def main() -> None:
     print("-" * len(header))
     lines = [header, "-" * len(header)]
     for name, a in rows:
-        flags = " ".join(("LIKW" if a.breaches[l]["liquidated"] else "ok").ljust(4) for l in levs)
+        flags = " ".join(("LIKW" if a.breaches[lev]["liquidated"] else "ok").ljust(4) for lev in levs)
         surv = "TAK" if cross.survives(a.worst_window_up) else "NIE"
         buf = cross.max_basis_stress(a.worst_window_up)
         line = (f"{name:6} {a.n_bars:5d} {a.worst_window_up:9.1%}  {flags}     "
@@ -81,7 +81,7 @@ def main() -> None:
         lines.append(line)
 
     print("\nPrógi likwidacji ISOLATED (ruch w górę): " +
-          ", ".join(f"{l:.0f}x → +{(1/l - args.mmr) * 100:.0f}%" for l in levs))
+          ", ".join(f"{lev:.0f}x → +{(1/lev - args.mmr) * 100:.0f}%" for lev in levs))
     print("ISOLATED LIKW = short odseparowany zostałby zlikwidowany tym ruchem.")
     print("CROSS przeżywa = w portfolio margin zysk ze spotu pokrywa stratę perpa (delta-neutral).")
     print("bufor-basis = o ile perp może wystrzelić PONAD spot i nadal przeżyć (zapas na squeeze).")
@@ -93,7 +93,7 @@ def main() -> None:
 def _write_doc(lines: list[str], levs, args, cross) -> None:
     import datetime
     today = datetime.date.today().isoformat()
-    thresholds = ", ".join(f"{l:.0f}x → +{(1 / l - args.mmr) * 100:.0f}%" for l in levs)
+    thresholds = ", ".join(f"{lev:.0f}x → +{(1 / lev - args.mmr) * 100:.0f}%" for lev in levs)
     doc = f"""# RYZYKO SHORT — realna historia cen (isolated vs cross margin)
 
 > Wygenerowane {today} przez `scripts/study_alt_risk.py`. Interwał {args.interval},
