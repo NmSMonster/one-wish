@@ -44,7 +44,9 @@ def test_asset_exposure_limit_blocks():
 
 
 def test_total_exposure_limit_blocks():
-    m = mgr(max_total_exposure_usd=400.0, max_asset_exposure_usd=10_000.0)
+    # asset ≤ total (spójna konfiguracja): ETH 350 + BTC 100 = 450 > total 400,
+    # ale każde z osobna ≤ limit na aktywo → blokuje DOPIERO łączny limit
+    m = mgr(max_total_exposure_usd=400.0, max_asset_exposure_usd=400.0)
     m.register_open(Asset.ETH, 350.0)
     d = m.approve(intent(asset=Asset.BTC, notional=100.0), tick_with(50.0))
     assert not d.approved and "łączna ekspozycja" in d.reason
@@ -124,3 +126,53 @@ def test_emergency_stop_triggers_kill():
     asyncio.run(bus.publish(Event(EventType.EMERGENCY_STOP, 1.0, "mon",
                                   payload={"reason": "stale feed"})))
     assert m.is_killed
+
+
+# -- walidacja konfiguracji (fail-fast na starcie) -------------------------- #
+def _bad(**kw):
+    import pytest
+    with pytest.raises(ValueError):
+        RiskConfig(**kw)
+
+
+def test_config_rejects_nonpositive_limits():
+    _bad(max_daily_loss_usd=0.0)          # brak limitu straty = katastrofa
+    _bad(max_daily_loss_usd=-50.0)        # literówka ze znakiem
+    _bad(max_trade_notional_usd=0.0)
+    _bad(perp_leverage=0.0)
+    _bad(max_open_positions=0)
+
+
+def test_config_rejects_excessive_leverage():
+    _bad(perp_leverage=30.0)              # short likwiduje się przy ~5%
+    RiskConfig(perp_leverage=20.0)        # granica dozwolona
+
+
+def test_config_rejects_inconsistent_exposure_ladder():
+    # transakcja > na aktywo
+    _bad(max_trade_notional_usd=600.0, max_asset_exposure_usd=500.0,
+         max_total_exposure_usd=1500.0)
+    # na aktywo > łączne
+    _bad(max_asset_exposure_usd=2000.0, max_total_exposure_usd=1500.0)
+
+
+def test_config_rejects_bad_margin_health_thresholds():
+    _bad(margin_flatten_health=0.9)                       # flatten pod likwidacją (1.0)
+    _bad(margin_warn_health=1.2, margin_flatten_health=1.4)  # warn < flatten
+
+
+def test_config_from_yaml_validates(tmp_path):
+    import pytest
+    p = tmp_path / "bad.yaml"
+    p.write_text("perp_leverage: 50\nmax_daily_loss_usd: -10\n", encoding="utf-8")
+    with pytest.raises(ValueError):
+        RiskConfig.from_yaml(str(p))
+
+
+def test_default_and_shipped_config_are_valid():
+    RiskConfig()                                          # domyślna spójna
+    import os
+    yaml_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                             "risk_config.yaml")
+    if os.path.exists(yaml_path):
+        RiskConfig.from_yaml(yaml_path)                   # dostarczony plik też

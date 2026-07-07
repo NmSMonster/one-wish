@@ -36,6 +36,48 @@ class RiskConfig:
     margin_flatten_health: float = 1.3      # kontrolowany flatten ZANIM likwidacja (health=1)
     live_trading_enabled: bool = False
 
+    def __post_init__(self) -> None:
+        self.validate()
+
+    def validate(self) -> None:
+        """Fail-fast na starcie: niespójna konfiguracja ryzyka to cichy usuwacz
+        zabezpieczeń (literówka `perp_leverage: 30` albo `max_daily_loss_usd: -50`
+        to realna strata pieniędzy). Lepiej wywalić proces niż handlować bez limitu."""
+        errs: list[str] = []
+        # dodatnie limity (0 lub ujemne = brak limitu = katastrofa)
+        for name in ("max_daily_loss_usd", "max_trade_notional_usd",
+                     "max_asset_exposure_usd", "max_total_exposure_usd",
+                     "max_spread_bps", "perp_leverage", "maintenance_margin_rate"):
+            v = getattr(self, name)
+            if not isinstance(v, (int, float)) or v <= 0:
+                errs.append(f"{name} musi być > 0 (jest {v!r})")
+        for name in ("max_open_positions", "max_trades_per_day"):
+            v = getattr(self, name)
+            if not isinstance(v, int) or v <= 0:
+                errs.append(f"{name} musi być dodatnią liczbą całkowitą (jest {v!r})")
+        if self.min_depth_usd < 0:
+            errs.append(f"min_depth_usd nie może być ujemne (jest {self.min_depth_usd!r})")
+        # spójność ekspozycji: pojedyncza transakcja ≤ na aktywo ≤ łączna
+        if self.max_trade_notional_usd > self.max_asset_exposure_usd:
+            errs.append("max_trade_notional_usd > max_asset_exposure_usd (transakcja "
+                        "większa niż limit na aktywo — niespójne)")
+        if self.max_asset_exposure_usd > self.max_total_exposure_usd:
+            errs.append("max_asset_exposure_usd > max_total_exposure_usd (na aktywo "
+                        "większe niż łączne — niespójne)")
+        # dźwignia w bezpiecznym zakresie: >20x na nodze short = likwidacja przy ~5%
+        if self.perp_leverage > 20.0:
+            errs.append(f"perp_leverage {self.perp_leverage} > 20 — noga short likwiduje "
+                        "się przy małym ruchu; carry wymaga NISKIEJ dźwigni")
+        # progi zdrowia marginu: flatten musi być NAD likwidacją (1.0) i pod warn
+        if not (self.margin_flatten_health > 1.0):
+            errs.append(f"margin_flatten_health {self.margin_flatten_health} musi być > 1.0 "
+                        "(flatten PRZED likwidacją przy health=1)")
+        if not (self.margin_warn_health >= self.margin_flatten_health):
+            errs.append("margin_warn_health musi być ≥ margin_flatten_health "
+                        "(najpierw ostrzeżenie, potem flatten)")
+        if errs:
+            raise ValueError("Niespójna RiskConfig:\n  - " + "\n  - ".join(errs))
+
     @classmethod
     def from_yaml(cls, path: str) -> "RiskConfig":
         import yaml

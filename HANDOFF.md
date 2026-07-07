@@ -9,7 +9,7 @@
 
 One Wish to **realny bot tradingowy**: delta-neutral **basis/funding carry** na
 Binance (long spot + short perp, inkasowanie funding). Backend Python, event-driven,
-**376 testów pytest zielonych**. Edge (carry) **zwalidowany na ~roku realnej historii
+**382 testów pytest zielonych**. Edge (carry) **zwalidowany na ~roku realnej historii
 funding (~+18%/rok delta-neutral po prowizjach)**. Bot poprawnie wchodzi w carry na
 realnych danych. Realny handel jest **domyślnie zablokowany** — jesteśmy w fazie
 paper/walidacji, przed transportem na testnecie i pilotem.
@@ -29,7 +29,7 @@ Folder roboczy: katalog repo (na GitHubie). Testy: `python -m pytest -q`.
   prowizje — naprawione).
 - **Tryb „dislocation"** (opcjonalny, do badań): wejście na perp-rich spike.
 
-## 2. Status — co działa (376 testów zielonych)
+## 2. Status — co działa (382 testów zielonych)
 
 Pełny pipeline event-driven (`backend/`):
 
@@ -106,7 +106,7 @@ backend/
                liquidation_risk (ryzyko likwidacji altów z cen)
 scripts/       study_funding, run_backtest, run_edge_validation, run_paper_live,
                record_market, record_liquidations, scan_universe, run_testnet_smoke
-tests/         pełna suita pytest (376)
+tests/         pełna suita pytest (382)
 Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md,
                CARRY_VERDICT.md, UNIVERSE_SCAN.md, DATA_CONTRACT.md, RUNBOOK.md, ten HANDOFF.md
 ```
@@ -114,7 +114,7 @@ Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md
 ## 6. Jak uruchomić
 
 ```
-python -m pytest -q                              # 376 testów
+python -m pytest -q                              # 382 testów
 python scripts/study_funding.py                  # werdykt carry na historii funding (natychmiast)
 python scripts/scan_universe.py --top 25         # ranking aktywów po carry
 python scripts/run_backtest.py                   # backtest carry vs scalp (synthetic)
@@ -462,6 +462,15 @@ Z przeglądów Codexa „survive live" — zrobione: P0 OrderManager, #4 kwantyz
 - ✅ **Launchery Windows** (`start_live.bat`, `start_gui.bat`, `run_verdicts.bat`)
   — dwuklik zamiast komend: bot na żywych danych (WS, budżet 150 zł), cockpit,
   werdykty Tier A/B. Usuwa błąd operatora ze ścieżki krytycznej.
+
+- ✅ **Walidacja RiskConfig na starcie (fail-fast)** — literówka w `risk_config.yaml`
+  (`perp_leverage: 30`, `max_daily_loss_usd: -50`) po cichu usuwała limit
+  bezpieczeństwa = realna strata. Teraz `__post_init__` woła `validate()`:
+  wszystkie limity > 0, drabina ekspozycji spójna (transakcja ≤ na aktywo ≤
+  łączna), dźwignia ≤ 20x, progi zdrowia marginu spójne (flatten > likwidacja 1.0,
+  warn ≥ flatten). Niespójna konfiguracja → `ValueError` z listą problemów, proces
+  nie startuje. Ścieżka budżetu (`budget_risk_config` — równe capy) i dostarczony
+  `risk_config.yaml` przechodzą; pełne pokrycie testami (6 scenariuszy odrzucenia).
 
 **Zostało (buildable-now):**
 
