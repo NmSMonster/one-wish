@@ -100,5 +100,9 @@ def summarize(comparisons: list[VenueComparison], base: Venue = Venue.BINANCE) -
             "uplift_pp": c.uplift_vs(base),
             "venues": {q.venue.value: round(q.annualized_pct, 2) for q in c.quotes},
         })
-    rows.sort(key=lambda r: (r["uplift_pp"] is None, -(r["uplift_pp"] or 0.0)))
+    def _key(r: dict):
+        up = r["uplift_pp"]
+        return (up is None, -(up if isinstance(up, (int, float)) else 0.0))
+
+    rows.sort(key=_key)
     return rows

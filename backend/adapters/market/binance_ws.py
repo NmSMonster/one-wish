@@ -196,7 +196,9 @@ class BinanceWsSource(MarketSource):
                     attempt = 0
                     log.info("WS połączony (%s): %s", market, url.split("?")[0])
                     async for raw in ws:
-                        tick = assembler.on_message(raw, market=market)
+                        # ramki Binance są tekstowe; bytes (rzadko) dekodujemy defensywnie
+                        text = raw if isinstance(raw, str) else raw.decode("utf-8", "replace")
+                        tick = assembler.on_message(text, market=market)
                         if tick is not None:
                             await self._queue.put(tick)
             except asyncio.CancelledError:

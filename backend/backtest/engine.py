@@ -14,6 +14,7 @@ from ..adapters.market.base import MarketDataAdapter, MarketSource
 from ..app.pipeline import Pipeline
 from ..core.bus import EventBus
 from ..core.clock import SimClock
+from ..core.types import Signal
 from ..core.events import Event, EventType
 from ..risk import RiskConfig
 from .metrics import Metrics, compute_metrics
@@ -70,7 +71,8 @@ class _Collector:
         bus.subscribe(EventType.RISK_REJECTED, self._on_reject)
 
     def _on_signal(self, e: Event) -> None:
-        self.signal_edges.append(e.payload.expected_net_edge_bps)
+        if isinstance(e.payload, Signal):
+            self.signal_edges.append(e.payload.expected_net_edge_bps)
 
     def _on_open(self, e: Event) -> None:
         self.entries += 1

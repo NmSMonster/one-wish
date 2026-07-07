@@ -18,7 +18,7 @@ from dataclasses import replace
 
 from ..core.bus import EventBus
 from ..core.events import Event, EventType
-from ..core.types import MarketTick, Signal, SignalState
+from ..core.types import FairValue, MarketTick, Signal, SignalState
 from ..model.costs import CostModel
 from ..model.fair_value import FairValueModel
 
@@ -66,7 +66,7 @@ class RepricingDetector:
         # inaczej ważona (większa) pozycja przechodzi bramkę płynności policzoną dla
         # mniejszego, płaskiego nominału i margines bezpieczeństwa jest zawyżony.
         self.sizer = sizer
-        self.last_fair_value = None
+        self.last_fair_value: FairValue | None = None
         self._last_state: dict = {}
         self._bus: EventBus | None = None
 

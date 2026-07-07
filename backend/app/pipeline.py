@@ -52,9 +52,9 @@ class Pipeline:
             sk.update(sizer_kwargs or {})
             sizer = FundingWeightedSizer(**sk)
         self.sizer = sizer
-        det_kwargs = {"notional_usd": notional_usd, "sizer": sizer}
+        det_kwargs: dict[str, object] = {"notional_usd": notional_usd, "sizer": sizer}
         det_kwargs.update(detector_kwargs or {})
-        self.detector = RepricingDetector(self.fair, self.cost, **det_kwargs)
+        self.detector = RepricingDetector(self.fair, self.cost, **det_kwargs)  # type: ignore[arg-type]
         self.policy = StrategyPolicy(notional_usd=notional_usd, mode=policy_mode, sizer=sizer)
         self.circuit = CircuitBreaker()
         self.risk = RiskManager(risk_config, clock=self.clock, circuit=self.circuit)

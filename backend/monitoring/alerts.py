@@ -90,11 +90,12 @@ class WebhookSink(AlertSink):
     async def send(self, alert: Alert) -> None:
         if not self.url:
             return
+        url: str = self.url                   # po guardzie: pewny str (dla domknięcia _post)
         body = json.dumps(self.fmt(alert)).encode("utf-8")
 
         def _post() -> None:
             req = urllib.request.Request(
-                self.url, data=body,
+                url, data=body,
                 headers={"Content-Type": "application/json", "User-Agent": "one-wish/0.1"})
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                 resp.read()
@@ -113,7 +114,7 @@ def sinks_from_env(env: dict | None = None) -> list[AlertSink]:
 
     LogSink jest zawsze (lokalny ślad). Brak konfiguracji = tylko log.
     """
-    env = os.environ if env is None else env
+    env = dict(os.environ) if env is None else env
     sinks: list[AlertSink] = [LogSink()]
 
     discord = env.get("ONEWISH_ALERT_DISCORD_WEBHOOK")

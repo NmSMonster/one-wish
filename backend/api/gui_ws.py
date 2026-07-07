@@ -13,6 +13,7 @@ import asyncio
 import datetime
 import json
 import logging
+from typing import Any
 
 import websockets
 
@@ -117,7 +118,7 @@ class GuiApiServer:
         self._signal_series: dict = {}
         self._latency_ms = 0.0
         self._last_risk = {"decision": "", "reason": ""}
-        self._server = None
+        self._server: Any = None              # websockets.Server (Any: unikamy zależności typu)
         self._hb_task: asyncio.Task | None = None
         bus.subscribe_all(self._on_event)
 
@@ -181,7 +182,8 @@ class GuiApiServer:
 
         # po decyzji ryzyka dorzuć zaktualizowaną migawkę ryzyka
         if event.type in (EventType.RISK_APPROVED, EventType.RISK_REJECTED) and self._risk:
-            dec = (event.payload or {}).get("decision")
+            payload = event.payload if isinstance(event.payload, dict) else {}
+            dec = payload.get("decision")
             if dec is not None:
                 self._last_risk = {"decision": event.type.value, "reason": dec.reason}
             self._broadcast(self._risk_msg())

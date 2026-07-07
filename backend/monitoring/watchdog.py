@@ -90,6 +90,7 @@ class Monitor:
                 f"funding {snap.funding_collected:+.2f}, fees {snap.fees_paid:.2f})")
 
     async def _emergency(self, ts: float, reason: str) -> None:
+        assert self._bus is not None          # wołane tylko po sprawdzeniu _bus w callerach
         self._stopped = True
         log.critical("EMERGENCY_STOP: %s", reason)
         await self._bus.publish(Event(EventType.EMERGENCY_STOP, ts, self.SOURCE,

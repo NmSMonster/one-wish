@@ -50,7 +50,7 @@ class ExecutionEngine:
             self._marks[t.asset] = (t.spot, t.perp)
 
     async def _on_approved(self, event: Event) -> None:
-        payload = event.payload or {}
+        payload = event.payload if isinstance(event.payload, dict) else {}
         intent = payload.get("intent")
         decision = payload.get("decision")
         if not isinstance(intent, TradeIntent) or decision is None or not decision.approved:

@@ -472,6 +472,16 @@ Z przeglądów Codexa „survive live" — zrobione: P0 OrderManager, #4 kwantyz
   nie startuje. Ścieżka budżetu (`budget_risk_config` — równe capy) i dostarczony
   `risk_config.yaml` przechodzą; pełne pokrycie testami (6 scenariuszy odrzucenia).
 
+- ✅ **Statyczne typowanie (mypy) — zielone i w CI** — 21 realnych ostrzeżeń
+  typów naprawionych porządnie (nie tłumieniem): zawężanie payloadu przez
+  `isinstance` zamiast `.get` na `object`, asercje inwariantu `_bus is not None`
+  w metodach wołanych tylko po `attach()`, adnotacje (`last_fair_value:
+  FairValue|None`, `_server: Any`), defensywne dekodowanie bytes ze streamu WS,
+  asercje kluczy API w podpisie live (gwarantowane przez `arm()`). `mypy.ini`
+  (check_untyped_defs, warn_unused_ignores). CI odpala teraz **ruff + mypy +
+  pytest** na py3.11/3.12. Zielony mypy = kontrakt typów trzyma, cała klasa
+  błędów „None nie ma atrybutu" wyłapana zanim dotknie rynku.
+
 **Zostało (buildable-now):**
 
 9. **⭐ DECYZJA WŁAŚCICIELA: forward paper-trade na ŻYWYM rynku z fikcyjnym budżetem

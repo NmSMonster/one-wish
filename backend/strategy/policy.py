@@ -62,6 +62,7 @@ class StrategyPolicy:
         # `edge` w trybie carry to forward funding_bps (Signal.expected_net_edge_bps) —
         # dokładnie to, czym sizer waży kapitał. W trybie dislocation `edge` ma inną
         # semantykę (net edge disloc+carry-cost); sizer jest wtedy opt-in świadomie.
+        assert self._bus is not None          # wołane tylko z handlerów po attach()
         notional = self.sizer.size(edge) if self.sizer is not None else self.notional_usd
         self._inflight.add(asset)
         await self._bus.publish(Event(EventType.TRADE_INTENT, ts, self.SOURCE,
@@ -69,6 +70,7 @@ class StrategyPolicy:
                                                           edge, reason)))
 
     async def _emit_close(self, asset, ts, reason) -> None:
+        assert self._bus is not None          # wołane tylko z handlerów po attach()
         self._closing.add(asset)
         await self._bus.publish(Event(EventType.TRADE_INTENT, ts, self.SOURCE,
                                       payload=TradeIntent(asset, ts, "CLOSE", 0.0, 0.0, reason)))
@@ -125,7 +127,7 @@ class StrategyPolicy:
             self._closing.discard(p.asset)
 
     async def _on_rejected(self, event: Event) -> None:
-        payload = event.payload or {}
+        payload = event.payload if isinstance(event.payload, dict) else {}
         intent = payload.get("intent")
         if isinstance(intent, TradeIntent):
             self._inflight.discard(intent.asset)

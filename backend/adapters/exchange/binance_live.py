@@ -122,11 +122,13 @@ class BinanceLiveAdapter(ExchangeAdapter):
     # -- podpisywanie i transport (jedyny styk I/O) ------------------------- #
     def _sign(self, query: str) -> str:
         """HMAC-SHA256 query stringa kluczem sekretnym (podpis zlecenia Binance)."""
+        assert self.api_secret is not None    # gwarantowane przez arm() przed wysyłką
         return hmac.new(self.api_secret.encode(), query.encode(), hashlib.sha256).hexdigest()
 
     def _signed_request(self, method: str, base: str, path: str, params: dict):
         """Podpisane zapytanie REST do Binance. Blokujące — wołaj w executorze.
         To jedyne miejsce realnego I/O; w testach jest stubowane."""
+        assert self.api_key is not None       # gwarantowane przez arm() przed wysyłką
         p = dict(params)
         p["timestamp"] = int(time.time() * 1000)
         p["recvWindow"] = self.recv_window_ms
