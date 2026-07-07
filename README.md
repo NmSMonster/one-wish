@@ -74,6 +74,9 @@ python scripts/run_paper_live.py --mode live --budget-pln 150 --funding-weighted
 
 CI: każdy push/PR przechodzi pełną suitę pytest + ruff (`.github/workflows/ci.yml`).
 Procedury operacyjne (alerty, recovery po padzie, stress-test marginu): `RUNBOOK.md`.
+Protokół walidacji S1→S5 (kryteria PASS/FAIL od sandboxa po pilot live): `VALIDATION.md`.
+Windows: dwuklik `start_live.bat` (bot na żywych danych) + `start_gui.bat` (cockpit)
++ `run_verdicts.bat` (werdykty pomiarowe Tier A/B).
 
 ### GUI (cockpit)
 
