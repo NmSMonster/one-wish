@@ -24,7 +24,7 @@ WARNING. Throttling per (rodzaj, aktywo); **CRITICAL nigdy nie jest tłumiony**.
 
 | Alert | Severity | Co znaczy | Reakcja operatora |
 |---|---|---|---|
-| **EMERGENCY STOP** | CRITICAL | Monitor zatrzymał bota (dzienny limit straty albo zamrożony feed). Ryzyko killnięte, pozycje domykane. | Zweryfikuj przyczynę w logu/raporcie. Nie restartuj na ślepo — najpierw ustal, czy strata realna czy z błędu danych. |
+| **EMERGENCY STOP** | CRITICAL | Monitor zatrzymał bota: dzienny limit straty **NETTO** (realized+unrealized+funding−fees, delta od początku doby UTC) albo martwy feed (STALE_FEED z adaptera LUB heartbeat przy pełnej ciszy źródła). Ryzyko killnięte, pozycje domykane po cenie rynkowej. | Zweryfikuj przyczynę w logu/raporcie. Nie restartuj na ślepo — najpierw ustal, czy strata realna czy z błędu danych. Strata w `unrealized` = rozjazd basis na trzymanych parach (realne ryzyko carry). |
 | **KILL SWITCH** | CRITICAL | Ręczny kill (operator/GUI). | Świadoma akcja — potwierdź, że to Ty/zespół. Jeśli nie, traktuj jak incydent bezpieczeństwa. |
 | **Margin flatten** | CRITICAL | Zdrowie marginu nogi short spadło ≤ próg flatten — kontrolowane domknięcie PRZED likwidacją. | Sprawdź, czy para domknęła się czysto (reconcile). Rozważ niższą dźwignię (`perp_leverage`) na przyszłość. |
 | **Margin warn** | WARNING | Zdrowie marginu w strefie ostrzegawczej (jeszcze bezpiecznie, ale blisko). | Obserwuj. Jeśli perp dalej rośnie — przygotuj się na flatten. Rozważ stress-test (`MarginStressTester`). |
@@ -41,6 +41,30 @@ Po każdej próbie otwarcia/zamknięcia pozycja jest **albo delta-neutral, albo 
 1. Nie panikuj — OrderManager kompensuje automatycznie (flatten).
 2. Jeśli zostało po restarcie: uruchom kontrolowany flatten (`_flatten` / CLOSE intent).
 3. Potwierdź flat: `reconcile()["imbalanced"] == []` i `book.is_open(asset) == False`.
+
+## Restart po padzie (crash-safe recovery)
+
+Sesje live piszą trwały audit trail do sqlite (domyślnie `data/onewish_live.db`).
+Po padzie procesu wystarczy **uruchomić tę samą komendę ponownie**:
+
+1. Runner odbudowuje księgę z audit trailu (log `RECOVERY: odbudowano księgę…`
+   z listą otwartych pozycji) — replay fillów + funding tą samą logiką księgowania.
+2. Ekspozycja ryzyka i nadzór wyjść wracają automatycznie (margin watchdog,
+   flip-funding exit, stop basis znów pilnują odzyskanych par).
+3. GUI pokazuje odzyskane pozycje od razu (snapshot przy połączeniu).
+4. Zweryfikuj: lista pozycji w logu RECOVERY zgadza się z oczekiwaniem; w live
+   z realnym transportem dodatkowo porównaj z giełdą (`reconcile()`).
+
+Ctrl+C to normalne zakończenie sesji — raport dzienny wypisze się mimo przerwania.
+Kasowanie pliku DB = świadoma utrata pamięci pozycji; nie rób tego z otwartym hedgem.
+
+## Transport danych live: REST vs WebSocket
+
+- `--transport rest` (domyślny): polling co `--interval` (2 s) — sprawdzony.
+- `--transport ws`: streamy Binance (bookTicker + markPrice@1s) — niższa latencja
+  i świeższy forward funding (`r` liczony przez giełdę). Reconnect automatyczny
+  (backoff do 30 s); przy pełnej ciszy źródła heartbeat Monitora robi EMERGENCY
+  STOP. Jeśli WS nie może się połączyć w Twojej sieci — wróć na REST.
 
 ## Stress-test marginu (przed/podczas trzymania)
 

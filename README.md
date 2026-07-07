@@ -67,7 +67,13 @@ python scripts/run_edge_validation.py --data data/binance_ticks.jsonl
 python scripts/run_paper_live.py --mode synthetic --watch
 #   live (realne dane Binance read-only, egzekucja NADAL paper):
 python scripts/run_paper_live.py --mode live --cycles 60
+#   live długoterminowo: fikcyjny budżet + sizing ważony funding + streamy WS;
+#   trwała baza (data/onewish_live.db) daje crash-safe recovery po restarcie:
+python scripts/run_paper_live.py --mode live --budget-pln 150 --funding-weighted --transport ws
 ```
+
+CI: każdy push/PR przechodzi pełną suitę pytest + ruff (`.github/workflows/ci.yml`).
+Procedury operacyjne (alerty, recovery po padzie, stress-test marginu): `RUNBOOK.md`.
 
 ### GUI (cockpit)
 
