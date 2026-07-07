@@ -47,6 +47,9 @@ def main() -> None:
                     help="ścieżka pliku sqlite (audit + crash-safe recovery). Domyślnie: "
                          "live → data/onewish_live.db (restart odzyskuje pozycje), "
                          "synthetic → :memory:.")
+    ap.add_argument("--transport", choices=["rest", "ws"], default="rest",
+                    help="transport danych live: rest = polling co --interval (domyślny), "
+                         "ws = streamy WebSocket Binance (niższa latencja, świeższy funding).")
     args = ap.parse_args()
 
     if args.db is None:
@@ -67,7 +70,10 @@ def main() -> None:
         budget_pln=args.budget_pln,
         funding_weighted=args.funding_weighted,
         db_path=args.db,
+        live_transport=args.transport,
     )
+    if args.mode == "live" and args.transport == "ws":
+        print("Transport danych: WebSocket (streamy Binance).")
     if args.db != ":memory:":
         print(f"Audit/recovery DB: {args.db} (restart odzyskuje otwarte pozycje)")
     if args.budget_pln is not None:

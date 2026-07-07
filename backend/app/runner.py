@@ -49,6 +49,7 @@ class OneWishApp:
         alerts: bool = True,
         budget_pln: float | None = None,
         funding_weighted: bool = False,
+        live_transport: str = "rest",
     ) -> None:
         self.mode = mode
         self.steps = steps
@@ -62,6 +63,9 @@ class OneWishApp:
         self.live_cycles = live_cycles
         self.poll_interval = poll_interval
         self.alerts = alerts
+        # transport danych live: "rest" (polling, domyślnie — zero regresji) albo
+        # "ws" (streamy WebSocket: niższa latencja, świeższy forward funding)
+        self.live_transport = live_transport
         # Tier A: waż nominał siłą forward funding (patrz backend/strategy/sizing.py)
         # zamiast płaskiej kwoty na każdą parę — kapitał przesuwa się w stronę wyżej
         # płacących aktywów. Opt-in, domyślnie wyłączone (zero zmiany zachowania).
@@ -87,6 +91,12 @@ class OneWishApp:
 
     def _build_source(self):
         if self.mode == "live":
+            if self.live_transport == "ws":
+                from ..adapters.market.binance_ws import BinanceWsSource
+                from ..core.types import ASSETS
+                max_ticks = (self.live_cycles * len(ASSETS)
+                             if self.live_cycles is not None else None)
+                return BinanceWsSource(max_ticks=max_ticks)
             return BinancePublicSource(poll_interval=self.poll_interval, max_cycles=self.live_cycles)
         return SyntheticSource(steps=self.steps, seed=self.seed, pace=self.pace)
 

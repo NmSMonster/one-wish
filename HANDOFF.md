@@ -9,7 +9,7 @@
 
 One Wish to **realny bot tradingowy**: delta-neutral **basis/funding carry** na
 Binance (long spot + short perp, inkasowanie funding). Backend Python, event-driven,
-**340 testów pytest zielonych**. Edge (carry) **zwalidowany na ~roku realnej historii
+**349 testów pytest zielonych**. Edge (carry) **zwalidowany na ~roku realnej historii
 funding (~+18%/rok delta-neutral po prowizjach)**. Bot poprawnie wchodzi w carry na
 realnych danych. Realny handel jest **domyślnie zablokowany** — jesteśmy w fazie
 paper/walidacji, przed transportem na testnecie i pilotem.
@@ -29,7 +29,7 @@ Folder roboczy: katalog repo (na GitHubie). Testy: `python -m pytest -q`.
   prowizje — naprawione).
 - **Tryb „dislocation"** (opcjonalny, do badań): wejście na perp-rich spike.
 
-## 2. Status — co działa (340 testów zielonych)
+## 2. Status — co działa (349 testów zielonych)
 
 Pełny pipeline event-driven (`backend/`):
 
@@ -106,7 +106,7 @@ backend/
                liquidation_risk (ryzyko likwidacji altów z cen)
 scripts/       study_funding, run_backtest, run_edge_validation, run_paper_live,
                record_market, record_liquidations, scan_universe, run_testnet_smoke
-tests/         pełna suita pytest (340)
+tests/         pełna suita pytest (349)
 Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md,
                CARRY_VERDICT.md, UNIVERSE_SCAN.md, DATA_CONTRACT.md, RUNBOOK.md, ten HANDOFF.md
 ```
@@ -114,7 +114,7 @@ Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md
 ## 6. Jak uruchomić
 
 ```
-python -m pytest -q                              # 340 testów
+python -m pytest -q                              # 349 testów
 python scripts/study_funding.py                  # werdykt carry na historii funding (natychmiast)
 python scripts/scan_universe.py --top 25         # ranking aktywów po carry
 python scripts/run_backtest.py                   # backtest carry vs scalp (synthetic)
@@ -398,6 +398,22 @@ Z przeglądów Codexa „survive live" — zrobione: P0 OrderManager, #4 kwantyz
   trades_today) i nadzór polityki (`restore_holding` — nie dubluje wejścia, pilnuje
   wyjścia). `run_paper_live --db PATH`; live domyślnie `data/onewish_live.db`
   (synthetic dalej `:memory:`). Nieznane aktywa w starej DB pomijane z logiem.
+- ✅ **Raport per sesja + UX:** granica sesji po rowid (ts nie rozdziela — SimClock
+  startuje od zera), Ctrl+C wypisuje raport, snapshot GUI odtwarza trzymane
+  pozycje nowym klientom (także po recovery), zamknięte znikają z cache.
+- ✅ **Transport WebSocket dla danych live** (`backend/adapters/market/binance_ws.py`)
+  — streamy zamiast pollingu REST 2s: spot bookTicker + perp bookTicker +
+  markPrice@1s (mark/index/`r`/T). `r` ze streamu = ŻYWA estymata forward funding
+  liczona przez giełdę (lepsza niż rekonstrukcja premia+clamp — zawiera interest).
+  Architektura jak w live adapterze: czysty `TickAssembler` (parsowanie → stan per
+  aktywo → MarketTick; throttle `min_emit_interval`; głębokość = notional
+  top-of-book; data_lag z czasu eventu giełdy) w pełni testowany offline; jedyny
+  styk I/O to `_pump` (websockets.connect, reconnect z backoffem wykładniczym,
+  sufit 30s). Dwa połączenia (spot+futures) zasilają wspólną kolejkę. Opt-in:
+  `run_paper_live.py --transport ws` (REST zostaje domyślny — zero regresji);
+  świeżość pilnują istniejące STALE_FEED + heartbeat. **Nie zweryfikowane na żywym
+  Binance** (sandbox blokuje) — pierwsze odpalenie na maszynie właściciela:
+  `python scripts/run_paper_live.py --mode live --transport ws --budget-pln 150`.
 
 **Zostało (buildable-now):**
 
