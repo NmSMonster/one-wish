@@ -50,6 +50,7 @@ class OneWishApp:
         budget_pln: float | None = None,
         funding_weighted: bool = False,
         live_transport: str = "rest",
+        flatten_on_exit: bool = False,
     ) -> None:
         self.mode = mode
         self.steps = steps
@@ -66,6 +67,9 @@ class OneWishApp:
         # transport danych live: "rest" (polling, domyślnie — zero regresji) albo
         # "ws" (streamy WebSocket: niższa latencja, świeższy forward funding)
         self.live_transport = live_transport
+        # domknij wszystkie pary przy końcu sesji (świadome zejście do flat —
+        # nic nie zostaje bez nadzoru; domyślnie OFF: carry trzyma, recovery pilnuje)
+        self.flatten_on_exit = flatten_on_exit
         # Tier A: waż nominał siłą forward funding (patrz backend/strategy/sizing.py)
         # zamiast płaskiej kwoty na każdą parę — kapitał przesuwa się w stronę wyżej
         # płacących aktywów. Opt-in, domyślnie wyłączone (zero zmiany zachowania).
@@ -162,6 +166,11 @@ class OneWishApp:
             await adapter.run()
         finally:
             monitor.stop_heartbeat()
+            if self.flatten_on_exit and any(p.is_open for p in pipe.book.positions.values()):
+                from ..core.events import Event, EventType
+                log.info("Flatten na koniec sesji (--flatten-on-exit): domykam pary")
+                await bus.publish(Event(EventType.FLATTEN, clock.now(), "runner",
+                                        payload={"reason": "koniec sesji (flatten-on-exit)"}))
             # raport z mark-to-market otwartych pozycji (ostatnie znane ceny) — bez
             # tego net udawałby, że trzymane pozycje nie mają wyniku
             self.report = build_report(db, pipe.book, marks=pipe.execution.marks,

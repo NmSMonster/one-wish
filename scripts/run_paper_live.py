@@ -50,6 +50,9 @@ def main() -> None:
     ap.add_argument("--transport", choices=["rest", "ws"], default="rest",
                     help="transport danych live: rest = polling co --interval (domyślny), "
                          "ws = streamy WebSocket Binance (niższa latencja, świeższy funding).")
+    ap.add_argument("--flatten-on-exit", action="store_true",
+                    help="domknij wszystkie pary na końcu sesji (świadome zejście do flat; "
+                         "domyślnie pozycje zostają — carry trzyma, recovery pilnuje po restarcie).")
     args = ap.parse_args()
 
     if args.db is None:
@@ -71,6 +74,7 @@ def main() -> None:
         funding_weighted=args.funding_weighted,
         db_path=args.db,
         live_transport=args.transport,
+        flatten_on_exit=args.flatten_on_exit,
     )
     if args.mode == "live" and args.transport == "ws":
         print("Transport danych: WebSocket (streamy Binance).")

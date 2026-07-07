@@ -226,6 +226,21 @@ def test_stale_feed_midsequence_triggers_emergency_flatten():
     assert not pipe.book.is_open(Asset.BTC)              # awaryjnie domknięte → flat
 
 
+def test_app_flatten_on_exit_closes_all_pairs():
+    """--flatten-on-exit: świadome zejście do flat na końcu sesji — żadna para
+    nie zostaje bez nadzoru. Domyślnie OFF (carry trzyma; recovery pilnuje)."""
+    app = OneWishApp(mode="synthetic", steps=200, seed=3, gui=False,
+                     risk_config=_generous(), notional_usd=200.0, flatten_on_exit=True)
+    report = asyncio.run(app.run())
+    assert report.counts.get("POSITION_OPENED", 0) > 0     # coś się otwierało
+    assert report.open_positions == 0                       # ...i wszystko domknięte
+
+    app_hold = OneWishApp(mode="synthetic", steps=200, seed=3, gui=False,
+                          risk_config=_generous(), notional_usd=200.0)
+    report_hold = asyncio.run(app_hold.run())
+    assert report_hold.open_positions > 0                   # default: carry trzyma
+
+
 def test_app_synthetic_runs_and_reports():
     app = OneWishApp(mode="synthetic", steps=200, seed=3, gui=False,
                      risk_config=_generous(), notional_usd=200.0)
