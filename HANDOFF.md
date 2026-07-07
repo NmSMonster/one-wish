@@ -9,7 +9,7 @@
 
 One Wish to **realny bot tradingowy**: delta-neutral **basis/funding carry** na
 Binance (long spot + short perp, inkasowanie funding). Backend Python, event-driven,
-**362 testów pytest zielonych**. Edge (carry) **zwalidowany na ~roku realnej historii
+**365 testów pytest zielonych**. Edge (carry) **zwalidowany na ~roku realnej historii
 funding (~+18%/rok delta-neutral po prowizjach)**. Bot poprawnie wchodzi w carry na
 realnych danych. Realny handel jest **domyślnie zablokowany** — jesteśmy w fazie
 paper/walidacji, przed transportem na testnecie i pilotem.
@@ -29,7 +29,7 @@ Folder roboczy: katalog repo (na GitHubie). Testy: `python -m pytest -q`.
   prowizje — naprawione).
 - **Tryb „dislocation"** (opcjonalny, do badań): wejście na perp-rich spike.
 
-## 2. Status — co działa (362 testów zielonych)
+## 2. Status — co działa (365 testów zielonych)
 
 Pełny pipeline event-driven (`backend/`):
 
@@ -106,7 +106,7 @@ backend/
                liquidation_risk (ryzyko likwidacji altów z cen)
 scripts/       study_funding, run_backtest, run_edge_validation, run_paper_live,
                record_market, record_liquidations, scan_universe, run_testnet_smoke
-tests/         pełna suita pytest (362)
+tests/         pełna suita pytest (365)
 Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md,
                CARRY_VERDICT.md, UNIVERSE_SCAN.md, DATA_CONTRACT.md, RUNBOOK.md, ten HANDOFF.md
 ```
@@ -114,7 +114,7 @@ Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md
 ## 6. Jak uruchomić
 
 ```
-python -m pytest -q                              # 362 testów
+python -m pytest -q                              # 365 testów
 python scripts/study_funding.py                  # werdykt carry na historii funding (natychmiast)
 python scripts/scan_universe.py --top 25         # ranking aktywów po carry
 python scripts/run_backtest.py                   # backtest carry vs scalp (synthetic)
@@ -437,6 +437,18 @@ Z przeglądów Codexa „survive live" — zrobione: P0 OrderManager, #4 kwantyz
   → float jest wystarczający w obecnej skali. Test zostaje w CI na stałe: jeśli
   przyszła zmiana księgowania wprowadzi dryf, suita zrobi się czerwona i DOPIERO
   wtedy refaktor na Decimal będzie uzasadniony twardym dowodem.
+
+- ✅ **Fuzz inwariantu + fix CICHEGO ORPHANA** (`tests/test_invariant_fuzz.py`):
+  property-testing przestrzeni scenariuszy — broker-chaos losuje reject/partial/
+  zgubiony-ack (z losowym wynikiem uzgodnienia) przez 90 ziaren × cykle open/close.
+  **Fuzz znalazł realną lukę:** gdy giełda odrzuca także zlecenia KOMPENSACYJNE,
+  OrderManager zostawiał gołą nogę po cichu (stan ABORTED, zero eskalacji) —
+  dotychczasowe chaos-testy tego nie łapały, bo ich brokery zawsze przepuszczały
+  CLOSE. **Fix:** `_escalate_if_orphan` — nieudana kompensacja emituje
+  EMERGENCY_STOP (CRITICAL: risk kill + alert operatora + retry domknięcia przez
+  ExecutionEngine), raz per aktywo (bez pętli zdarzeń), flaga kasowana po powrocie
+  do flat/balansu. Własność systemowa od teraz: **flat LUB zbilansowana LUB głośna
+  eskalacja — NIGDY cichy orphan** (+ regresja deterministyczna).
 
 **Zostało (buildable-now):**
 

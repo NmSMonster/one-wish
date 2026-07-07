@@ -81,6 +81,7 @@ class OrderManager:
         self._pair_seq = 0
         self._orders: dict[str, ManagedOrder] = {}
         self._pairs: list[PairOrder] = []
+        self._orphan_alerted: set = set()   # eskalacja raz per aktywo, aż wróci flat/balans
 
     def _next_coid(self, asset: Asset, leg: Leg) -> str:
         self._seq += 1
@@ -195,6 +196,30 @@ class OrderManager:
             return False
         return abs(pos.net_delta) <= self.tol_frac * max(1e-12, qty_ref)
 
+    async def _escalate_if_orphan(self, asset: Asset, qty_ref: float, ts: float) -> None:
+        """Inwariant w wersji uczciwej: „zbilansowana albo flat, a jeśli świat
+        odmówi — GŁOŚNO". Gdy nawet kompensacja nie przechodzi (giełda odrzuca /
+        gubi acki także dla zleceń zamykających), pozycja może zostać niezbilansowana.
+        Ciche ABORTED to najgorszy możliwy stan (goła ekspozycja bez nadzoru) —
+        eskalujemy EMERGENCY_STOP: risk kill, alert CRITICAL do operatora,
+        ExecutionEngine ponawia domknięcie. Emisja raz per aktywo (bez pętli
+        zdarzeń), kasowana gdy pozycja wróci do flat/balansu."""
+        pos = self.book.position(asset)
+        if pos is None or not pos.is_open or self._balanced(asset, qty_ref):
+            self._orphan_alerted.discard(asset)
+            return
+        if asset in self._orphan_alerted:
+            return
+        self._orphan_alerted.add(asset)
+        log.critical("ORPHAN LEG %s po nieudanej kompensacji: spot=%.10g perp=%.10g",
+                     asset.value, pos.spot_qty, pos.perp_qty)
+        await self._emit(
+            EventType.EMERGENCY_STOP,
+            {"reason": f"orphan leg {asset.value}: kompensacja nieudana "
+                       f"(spot={pos.spot_qty:.10g}, perp={pos.perp_qty:.10g}) — "
+                       "wymagana interwencja"},
+            ts, Severity.CRITICAL)
+
     async def _flatten(self, asset: Asset, spot_px: float | None = None,
                        perp_px: float | None = None) -> None:
         """Domyka pozycję po CENIE RYNKOWEJ (spot_px/perp_px), nie po cenie wejścia.
@@ -222,11 +247,14 @@ class OrderManager:
 
         if self._balanced(asset, qty_spot):
             pair.state = PairState.OPEN
+            self._orphan_alerted.discard(asset)
         else:
             # INVARIANT: nie zostawiamy orphan leg — kompensujemy do flat
             log.warning("Niepełna para %s — kompensacja (flatten)", asset.value)
             await self._flatten(asset, spot_px, perp_px)
             pair.state = PairState.ABORTED
+            # kompensacja też mogła nie przejść (chaos totalny) → głośna eskalacja
+            await self._escalate_if_orphan(asset, qty_spot, self._clock.now())
         self._pairs.append(pair)
         return pair
 
@@ -250,6 +278,12 @@ class OrderManager:
             pair.perp = await self._submit(asset, Leg.PERP, Side.BUY, abs(pos.perp_qty),
                                            px, "CLOSE")
         pair.state = PairState.CLOSED if not self.book.is_open(asset) else PairState.OPEN
+        if pair.state == PairState.CLOSED:
+            self._orphan_alerted.discard(asset)
+        else:
+            # zamknięcie jednej nogi przeszło, drugiej nie → orphan; nie milczymy
+            qty_ref = abs(pos.spot_qty) if pos is not None else 1.0
+            await self._escalate_if_orphan(asset, max(qty_ref, 1e-9), self._clock.now())
         self._pairs.append(pair)
         return pair
 
