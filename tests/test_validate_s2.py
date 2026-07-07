@@ -1,8 +1,13 @@
-"""Test automatu oceny S2: na bazie z realnej (syntetycznej) sesji pipeline'u."""
+"""Test automatu oceny S2: na bazie z realnej (syntetycznej) sesji pipeline'u.
+
+JEDNA sesja na plikowej bazie (fsync per event = kosztowna), oceniana dwoma
+progami — to samo pokrycie co dwie osobne sesje, połowa kosztu."""
 import asyncio
 import importlib.util
 import os
 import sys
+
+import pytest
 
 _SPEC = importlib.util.spec_from_file_location(
     "validate_s2",
@@ -17,28 +22,25 @@ from backend.storage import Database  # noqa: E402
 from tests.test_runner import _generous  # noqa: E402
 
 
-def _run_session(db_path: str, steps: int = 300) -> None:
-    app = OneWishApp(mode="synthetic", steps=steps, seed=3, gui=False,
-                     risk_config=_generous(), notional_usd=200.0, db_path=db_path)
+@pytest.fixture(scope="module")
+def session_db(tmp_path_factory):
+    path = str(tmp_path_factory.mktemp("s2") / "s2.db")
+    app = OneWishApp(mode="synthetic", steps=80, seed=3, gui=False,
+                     risk_config=_generous(), notional_usd=200.0, db_path=path)
     asyncio.run(app.run())
+    return path
 
 
-def test_s2_evaluator_measures_real_session_db(tmp_path):
-    path = str(tmp_path / "s2.db")
-    _run_session(path)
-    checks = validate_s2.evaluate(Database(path), min_hours=0.0)
-    by = {c["crit"]: c for c in checks}
-
+def test_s2_evaluator_passes_real_session(session_db):
+    by = {c["crit"]: c for c in validate_s2.evaluate(Database(session_db), min_hours=0.0)}
     assert by["2.1 czas sesji"]["ok"] is True                 # min_hours=0 → zalicza
     assert by["2.3 świeżość danych"]["ok"] is True            # syntetyk: lag ~5 ms
     assert by["2.4 wejścia z sygnału"]["ok"] is True          # każde wejście z EDGE
-    assert by["2.5 delta-neutralność"]["ok"] is True          # pary domknięte per sztuka
+    assert by["2.5 delta-neutralność"]["ok"] is True          # pary delta-neutral per sztuka
     assert by["2.6/2.8 funding+PnL"]["ok"] is True
 
 
-def test_s2_evaluator_fails_on_too_short_session(tmp_path):
-    path = str(tmp_path / "s2short.db")
-    _run_session(path, steps=50)
-    checks = validate_s2.evaluate(Database(path), min_hours=48.0)
-    by = {c["crit"]: c for c in checks}
-    assert by["2.1 czas sesji"]["ok"] is False                # 50 kroków ≪ 48 h
+def test_s2_evaluator_fails_on_too_short_session(session_db):
+    # ta sama sesja (~0.1 h) oceniona progiem 48 h → 2.1 oblewa; brak drugiej sesji
+    by = {c["crit"]: c for c in validate_s2.evaluate(Database(session_db), min_hours=48.0)}
+    assert by["2.1 czas sesji"]["ok"] is False
