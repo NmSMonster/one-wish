@@ -9,7 +9,7 @@
 
 One Wish to **realny bot tradingowy**: delta-neutral **basis/funding carry** na
 Binance (long spot + short perp, inkasowanie funding). Backend Python, event-driven,
-**374 testów pytest zielonych**. Edge (carry) **zwalidowany na ~roku realnej historii
+**376 testów pytest zielonych**. Edge (carry) **zwalidowany na ~roku realnej historii
 funding (~+18%/rok delta-neutral po prowizjach)**. Bot poprawnie wchodzi w carry na
 realnych danych. Realny handel jest **domyślnie zablokowany** — jesteśmy w fazie
 paper/walidacji, przed transportem na testnecie i pilotem.
@@ -29,7 +29,7 @@ Folder roboczy: katalog repo (na GitHubie). Testy: `python -m pytest -q`.
   prowizje — naprawione).
 - **Tryb „dislocation"** (opcjonalny, do badań): wejście na perp-rich spike.
 
-## 2. Status — co działa (374 testów zielonych)
+## 2. Status — co działa (376 testów zielonych)
 
 Pełny pipeline event-driven (`backend/`):
 
@@ -106,7 +106,7 @@ backend/
                liquidation_risk (ryzyko likwidacji altów z cen)
 scripts/       study_funding, run_backtest, run_edge_validation, run_paper_live,
                record_market, record_liquidations, scan_universe, run_testnet_smoke
-tests/         pełna suita pytest (374)
+tests/         pełna suita pytest (376)
 Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md,
                CARRY_VERDICT.md, UNIVERSE_SCAN.md, DATA_CONTRACT.md, RUNBOOK.md, ten HANDOFF.md
 ```
@@ -114,7 +114,7 @@ Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md
 ## 6. Jak uruchomić
 
 ```
-python -m pytest -q                              # 374 testów
+python -m pytest -q                              # 376 testów
 python scripts/study_funding.py                  # werdykt carry na historii funding (natychmiast)
 python scripts/scan_universe.py --top 25         # ranking aktywów po carry
 python scripts/run_backtest.py                   # backtest carry vs scalp (synthetic)
@@ -449,6 +449,19 @@ Z przeglądów Codexa „survive live" — zrobione: P0 OrderManager, #4 kwantyz
   ExecutionEngine), raz per aktywo (bez pętli zdarzeń), flaga kasowana po powrocie
   do flat/balansu. Własność systemowa od teraz: **flat LUB zbilansowana LUB głośna
   eskalacja — NIGDY cichy orphan** (+ regresja deterministyczna).
+
+- ✅ **Protokół walidacji S1→S5 + automat oceny S2** (`VALIDATION.md`,
+  `scripts/validate_s2.py`): kryteria PASS/FAIL zdefiniowane PRZED testem, żeby
+  żadnego wyniku nie dało się zracjonalizować po fakcie. S1 (sandbox) zaliczone
+  i pilnowane przez CI. `validate_s2.py DB` czyta trwały audit trail sesji
+  paper-live i wprost mierzy: długość sesji, medianę data_lag, awaryjne stopy,
+  zgodność wejść z regułami (każde OPEN ma wcześniejszy EDGE na aktywie — okno
+  kaskady, bo OPEN trafia do DB przed swoim EDGE), delta-neutralność odbudowanej
+  księgi, sanity funding+PnL → tabela + kod wyjścia 0/1 (automatyzowalne). Testy:
+  ocena realnej syntetycznej sesji zalicza, za krótka sesja oblewa 2.1.
+- ✅ **Launchery Windows** (`start_live.bat`, `start_gui.bat`, `run_verdicts.bat`)
+  — dwuklik zamiast komend: bot na żywych danych (WS, budżet 150 zł), cockpit,
+  werdykty Tier A/B. Usuwa błąd operatora ze ścieżki krytycznej.
 
 **Zostało (buildable-now):**
 
