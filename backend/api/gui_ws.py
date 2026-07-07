@@ -112,6 +112,7 @@ class GuiApiServer:
         self._clock = clock or RealClock()
         self._clients: set = set()
         self._marks: dict = {}
+        self._positions: dict = {}    # id → ostatnia wiadomość pozycji (snapshot dla nowych klientów)
         self._pnl_series: list = []
         self._signal_series: dict = {}
         self._latency_ms = 0.0
@@ -159,6 +160,13 @@ class GuiApiServer:
         msg = event_to_gui(event, self._marks)
         if msg is None:
             return
+        if msg["type"] == "position":
+            # cache do snapshotu: klient łączący się PO otwarciu (albo po recovery)
+            # musi zobaczyć trzymane pozycje, nie pustą tabelę
+            if msg.get("closed"):
+                self._positions.pop(msg["id"], None)
+            else:
+                self._positions[msg["id"]] = msg
         if msg["type"] == "pnl":
             self._pnl_series.append({"ts": event.ts, "value": msg["net"]})
             self._pnl_series = self._pnl_series[-180:]
@@ -199,6 +207,8 @@ class GuiApiServer:
         await ws.send(json.dumps(self._status_msg()))
         if self._risk:
             await ws.send(json.dumps(self._risk_msg()))
+        for msg in self._positions.values():   # trzymane pozycje od razu w tabeli
+            await ws.send(json.dumps(msg))
 
     async def _heartbeat(self) -> None:
         try:

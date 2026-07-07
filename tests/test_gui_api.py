@@ -127,6 +127,40 @@ def test_gui_server_roundtrip():
     asyncio.run(scenario())
 
 
+def test_snapshot_replays_held_positions_to_new_client():
+    """Regresja: klient łączący się PO otwarciu pozycji (albo po crash-recovery)
+    widział pustą tabelę — snapshot nie zawierał pozycji. Serwer cache'uje ostatnią
+    wiadomość pozycji per id i odtwarza ją nowym klientom; zamknięcie usuwa z cache."""
+
+    class _FakeWs:
+        def __init__(self):
+            self.sent: list = []
+
+        async def send(self, raw):
+            self.sent.append(json.loads(raw))
+
+    async def scenario():
+        bus = EventBus()
+        server = GuiApiServer(bus, connection="SIMULATION")
+        server._broadcast = lambda m: None
+        pos = Position(id="p1", asset=Asset.BTC, spot_qty=1.0, spot_entry=100.0,
+                       perp_qty=-1.0, perp_entry=100.0)
+        await bus.publish(Event(EventType.POSITION_OPENED, 1.0, "e", payload=pos))
+
+        ws = _FakeWs()
+        await server._send_snapshot(ws)
+        assert any(m["type"] == "position" and m["id"] == "p1" for m in ws.sent)
+
+        closed = Position(id="p1", asset=Asset.BTC, spot_qty=0.0, spot_entry=100.0,
+                          perp_qty=0.0, perp_entry=100.0, closed_ts=2.0)
+        await bus.publish(Event(EventType.POSITION_CLOSED, 2.0, "e", payload=closed))
+        ws2 = _FakeWs()
+        await server._send_snapshot(ws2)
+        assert not any(m["type"] == "position" for m in ws2.sent)   # zamknięta znika
+
+    asyncio.run(scenario())
+
+
 # -- E2E: cały bot idzie w parze z GUI -------------------------------------- #
 def test_full_pipeline_flows_to_gui_contract():
     """Dowód, że CAŁY bot działa w parze z GUI: Pipeline i GuiApiServer na jednej

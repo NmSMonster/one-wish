@@ -77,7 +77,15 @@ def main() -> None:
         print("Tier A: sizing ważony forward funding (więcej kapitału do wyżej płacących aktywów).")
     if not args.no_gui:
         print(f"GUI: otworz index.html (config adapter=\"ws\") -> ws://127.0.0.1:{args.port}/gui")
-    report = asyncio.run(app.run())
+    try:
+        report = asyncio.run(app.run())
+    except KeyboardInterrupt:
+        # Ctrl+C to NORMALNE zakończenie sesji live — raport i tak się należy
+        # (app.run() buduje go w finally, zanim wyjątek poleci wyżej).
+        print("\nPrzerwano (Ctrl+C) — raport sesji:")
+        report = app.report
+    if report is None:
+        return
     print()
     print(report.summary())
     if app.budget_report is not None:

@@ -101,17 +101,6 @@ class OneWishApp:
         pipe = Pipeline(bus, risk_config=self.risk_config, notional_usd=self.notional_usd,
                         broker=broker, clock=clock, funding_weighted=self.funding_weighted)
 
-        if self.db_path != ":memory:":
-            # crash-safe restart: odbuduj księgę z trwałego audit trailu (fille +
-            # funding) i przywróć ekspozycję ryzyka — bot po padzie wie o swoich
-            # pozycjach (margin watchdog / wyjścia znów je nadzorują).
-            from ..execution import restore_book
-            restore_book(db, pipe.book)
-            for asset, pos in pipe.book.positions.items():
-                if pos.is_open:
-                    pipe.risk.restore_exposure(asset, abs(pos.spot_qty * pos.spot_entry))
-                    pipe.policy.restore_holding(asset)   # nadzór wyjść nad odzyskaną parą
-
         monitor = Monitor(bus, max_daily_loss_usd=self.risk_config.max_daily_loss_usd, clock=clock)
         monitor.attach(bus)
         if self.mode == "live":
@@ -140,6 +129,22 @@ class OneWishApp:
             except OSError as exc:
                 log.warning("GUI API nie wystartował (%s) — kontynuuję bez GUI", exc)
                 gui_server = None
+
+        if self.db_path != ":memory:":
+            # crash-safe restart: odbuduj księgę z trwałego audit trailu (fille +
+            # funding) i przywróć ekspozycję ryzyka — bot po padzie wie o swoich
+            # pozycjach (margin watchdog / wyjścia znów je nadzorują). Blok stoi
+            # PO starcie GUI, żeby POSITION_UPDATED trafił też do jego snapshotu.
+            from ..core.events import Event, EventType
+            from ..execution import restore_book
+            restore_book(db, pipe.book)
+            for asset, pos in pipe.book.positions.items():
+                if pos.is_open:
+                    pipe.risk.restore_exposure(asset, abs(pos.spot_qty * pos.spot_entry))
+                    pipe.policy.restore_holding(asset)   # nadzór wyjść nad odzyskaną parą
+                    # GUI/monitoring widzą odzyskaną pozycję (tabela pozycji + snapshot)
+                    await bus.publish(Event(EventType.POSITION_UPDATED, clock.now(),
+                                            "recovery", payload=pos))
 
         adapter = MarketDataAdapter(self._build_source(), bus, clock)
         session_rowid = db.max_event_rowid()   # granica sesji: raport liczy tylko TĘ sesję
