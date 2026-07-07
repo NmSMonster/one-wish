@@ -181,6 +181,10 @@ class BinanceWsSource(MarketSource):
     max_ticks: int | None = None
     reconnect_base_s: float = 1.0
     reconnect_cap_s: float = 30.0
+    # nadpisywalne URL-e: testy E2E celują w LOKALNY symulator giełdy (prawdziwy
+    # serwer WS) — weryfikacja całego stacku sieciowego bez dostępu do Binance
+    spot_url: str | None = None
+    fut_url: str | None = None
     _queue: asyncio.Queue = field(default_factory=asyncio.Queue, repr=False)
 
     async def _pump(self, url: str, market: str, assembler: TickAssembler) -> None:
@@ -207,8 +211,10 @@ class BinanceWsSource(MarketSource):
     async def ticks(self) -> AsyncIterator[MarketTick]:
         assembler = TickAssembler(self.assets, self.min_emit_interval)
         pumps = [
-            asyncio.create_task(self._pump(spot_stream_url(self.assets), "spot", assembler)),
-            asyncio.create_task(self._pump(fut_stream_url(self.assets), "fut", assembler)),
+            asyncio.create_task(self._pump(self.spot_url or spot_stream_url(self.assets),
+                                           "spot", assembler)),
+            asyncio.create_task(self._pump(self.fut_url or fut_stream_url(self.assets),
+                                           "fut", assembler)),
         ]
         emitted = 0
         try:
