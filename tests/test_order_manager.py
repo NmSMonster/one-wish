@@ -210,6 +210,22 @@ def test_close_pair_uses_market_price_not_entry():
     assert abs(om.book.realized_pnl - 10.0) < 1e-9
 
 
+def test_avg_price_is_qty_weighted_across_partials():
+    """Regresja: avg_price brał cenę OSTATNIEGO filla — po dosyłce reszty po
+    partial-fill średnia była przekłamana. Ma być średnia ważona ilością."""
+    from backend.execution.order_manager import ManagedOrder, OrderManager
+    from backend.core.types import Fill, Leg, Side
+
+    mo = ManagedOrder(asset=Asset.BTC, leg=Leg.SPOT, side=Side.BUY,
+                      target_qty=1.0, price=100.0)
+    OrderManager._apply_fill_to_order(
+        mo, Fill("c", Asset.BTC, Leg.SPOT, Side.BUY, 100.0, 0.75, 0.0, 1.0))
+    OrderManager._apply_fill_to_order(
+        mo, Fill("c", Asset.BTC, Leg.SPOT, Side.BUY, 120.0, 0.25, 0.0, 1.0))
+    assert abs(mo.filled_qty - 1.0) < 1e-12
+    assert abs(mo.avg_price - 105.0) < 1e-9        # 0.75×100 + 0.25×120
+
+
 def test_close_pair_without_price_falls_back_to_entry():
     """Bez podanych cen (np. testy jednostkowe) — fallback do entry, jak dotąd."""
     om = _om(PaperBrokerAdapter(slippage_bps=0.0))

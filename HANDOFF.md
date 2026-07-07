@@ -9,7 +9,7 @@
 
 One Wish to **realny bot tradingowy**: delta-neutral **basis/funding carry** na
 Binance (long spot + short perp, inkasowanie funding). Backend Python, event-driven,
-**328 testów pytest zielonych**. Edge (carry) **zwalidowany na ~roku realnej historii
+**333 testów pytest zielonych**. Edge (carry) **zwalidowany na ~roku realnej historii
 funding (~+18%/rok delta-neutral po prowizjach)**. Bot poprawnie wchodzi w carry na
 realnych danych. Realny handel jest **domyślnie zablokowany** — jesteśmy w fazie
 paper/walidacji, przed transportem na testnecie i pilotem.
@@ -29,7 +29,7 @@ Folder roboczy: katalog repo (na GitHubie). Testy: `python -m pytest -q`.
   prowizje — naprawione).
 - **Tryb „dislocation"** (opcjonalny, do badań): wejście na perp-rich spike.
 
-## 2. Status — co działa (328 testów zielonych)
+## 2. Status — co działa (333 testów zielonych)
 
 Pełny pipeline event-driven (`backend/`):
 
@@ -106,7 +106,7 @@ backend/
                liquidation_risk (ryzyko likwidacji altów z cen)
 scripts/       study_funding, run_backtest, run_edge_validation, run_paper_live,
                record_market, record_liquidations, scan_universe, run_testnet_smoke
-tests/         pełna suita pytest (328)
+tests/         pełna suita pytest (333)
 Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md,
                CARRY_VERDICT.md, UNIVERSE_SCAN.md, DATA_CONTRACT.md, RUNBOOK.md, ten HANDOFF.md
 ```
@@ -114,7 +114,7 @@ Dokumenty:     README, ONE_WISH_STRATEGY.md, ARCHITECTURE.md, EDGE_VALIDATION.md
 ## 6. Jak uruchomić
 
 ```
-python -m pytest -q                              # 328 testów
+python -m pytest -q                              # 333 testów
 python scripts/study_funding.py                  # werdykt carry na historii funding (natychmiast)
 python scripts/scan_universe.py --top 25         # ranking aktywów po carry
 python scripts/run_backtest.py                   # backtest carry vs scalp (synthetic)
@@ -367,6 +367,23 @@ Z przeglądów Codexa „survive live" — zrobione: P0 OrderManager, #4 kwantyz
   refaktor EventBus na współbieżny (duża zmiana, sekwencyjność jest też gwarancją
   porządku zdarzeń — batch commit DB adresuje realny koszt); min-hold w polityce
   (EMA exit już tłumi churn; payback-gate tnie problem u źródła).
+
+- ✅ **Audyt #3 — guard drawdownu NETTO + rollover doby (ostatnie znane luki):**
+  1. **Monitor: limit dzienny liczy NETTO** (realized + unrealized + funding − fees)
+     jako deltę od początku doby UTC. Wcześniej patrzył tylko na realized — dla
+     delta-neutral carry realized ≈ 0 przez cały czas trzymania, więc rozjazd basis
+     (realny drawdown) NIGDY nie zatrzymałby bota. Rollover doby po ts eventu:
+     wielodniowa sesja nie kumuluje wczorajszej straty do dzisiejszego limitu.
+  2. **RiskManager: liczniki dzienne naprawdę dzienne** — `_maybe_rollover(ts)`
+     (z ticków i PNL_UPDATE) resetuje trades_today i bazę realized;
+     `realized_pnl_today` = delta od początku doby, nie skumulowane od startu.
+  3. **avg_price ważone ilością** (`_apply_fill_to_order`) — cena ostatniego filla
+     przekłamywała średnią po dosyłce reszty po partial.
+  4. **Zero resztkowej delty przy otwarciu** — obie nogi na TEJ SAMEJ ilości
+     bazowej (hedge znosi się per sztuka); qty_perp = notional/perp zostawiał
+     deltę ~basis na każdej parze.
+  Suita 328→**333**. Tym samym WSZYSTKIE punkty z obu audytów (własnego i
+  zewnętrznego) są zamknięte.
 
 **Zostało (buildable-now):**
 

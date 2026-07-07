@@ -138,8 +138,7 @@ class OrderManager:
                 continue
             for fill in result.fills:
                 self.book.apply_fill(fill, fill.ts)
-                mo.filled_qty += fill.qty
-                mo.avg_price = fill.price
+                self._apply_fill_to_order(mo, fill)
                 et = (EventType.PARTIAL_FILL
                       if result.status == OrderStatus.PARTIALLY_FILLED else EventType.FILL)
                 await self._emit(et, fill, fill.ts)
@@ -175,10 +174,18 @@ class OrderManager:
             return True
         for fill in q.fills:
             self.book.apply_fill(fill, fill.ts)
-            mo.filled_qty += fill.qty
-            mo.avg_price = fill.price
+            self._apply_fill_to_order(mo, fill)
             await self._emit(EventType.FILL, fill, fill.ts)
         return True
+
+    @staticmethod
+    def _apply_fill_to_order(mo: ManagedOrder, fill) -> None:
+        """avg_price = średnia WAŻONA ilością (nie cena ostatniego filla — przy
+        dosyłce reszty po partial-fill ostatnia cena przekłamywała średnią)."""
+        prev_qty = mo.filled_qty
+        mo.filled_qty = prev_qty + fill.qty
+        if mo.filled_qty > 0:
+            mo.avg_price = (mo.avg_price * prev_qty + fill.price * fill.qty) / mo.filled_qty
 
     def _balanced(self, asset: Asset, qty_ref: float) -> bool:
         pos = self.book.position(asset)

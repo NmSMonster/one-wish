@@ -60,6 +60,12 @@ class RiskManager:
         self.trades_today = 0
         self.exposure: dict[Asset, float] = {}
         self._last_tick: dict[Asset, MarketTick] = {}
+        # rollover doby (UTC, po ts eventów): liczniki "dzienne" muszą być NAPRAWDĘ
+        # dzienne — bez tego wielodniowa sesja kumuluje wczorajszą stratę/transakcje
+        # do dzisiejszych limitów i bot na drugi dzień jest bezpodstawnie zablokowany
+        self._day: int | None = None
+        self._realized_baseline = 0.0
+        self._last_realized_cum = 0.0
 
     # -- stan ---------------------------------------------------------------- #
     @property
@@ -82,6 +88,15 @@ class RiskManager:
     def reset_day(self) -> None:
         self.realized_pnl_today = 0.0
         self.trades_today = 0
+        self._realized_baseline = self._last_realized_cum
+
+    def _maybe_rollover(self, ts: float) -> None:
+        day = int(ts // 86_400)
+        if self._day is None:
+            self._day = day
+        elif day != self._day:
+            self._day = day
+            self.reset_day()
 
     def set_realized_pnl_today(self, value: float) -> None:
         self.realized_pnl_today = value
@@ -157,6 +172,7 @@ class RiskManager:
         tick = event.payload
         if isinstance(tick, MarketTick):
             self._last_tick[tick.asset] = tick
+            self._maybe_rollover(tick.ts)
 
     async def _on_position_opened(self, event: Event) -> None:
         p = event.payload
@@ -172,7 +188,11 @@ class RiskManager:
     async def _on_pnl(self, event: Event) -> None:
         snap = event.payload
         if isinstance(snap, PnLSnapshot):
-            self.realized_pnl_today = snap.realized
+            self._maybe_rollover(event.ts)
+            # snap.realized jest SKUMULOWANE od startu — "dzisiejsza" strata to
+            # delta od bazy z początku doby, nie cała historia sesji
+            self._last_realized_cum = snap.realized
+            self.realized_pnl_today = snap.realized - self._realized_baseline
 
     async def _on_intent(self, event: Event) -> None:
         intent = event.payload

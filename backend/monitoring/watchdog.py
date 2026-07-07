@@ -2,7 +2,12 @@
 
 Niezależnie od Risk Managera pilnuje twardych warunków awaryjnych i emituje
 EMERGENCY_STOP (który kill-uje Risk Managera i każe Execution domknąć pozycje):
-- przekroczony dzienny limit straty zrealizowanej,
+- przekroczony DZIENNY limit straty NETTO (realized + unrealized + funding − fees,
+  liczone jako delta od początku doby UTC). Netto, bo dla delta-neutral carry
+  realized ≈ 0 przez cały czas trzymania — realny drawdown (rozjazd basis) siedzi
+  w unrealized i guard patrzący tylko na realized NIGDY by go nie zauważył.
+  Dzienny naprawdę: baza resetuje się na przełomie doby (ts eventu, UTC), więc
+  wielodniowa sesja nie kumuluje wczorajszej straty do dzisiejszego limitu,
 - zamrożony feed danych — DWIE ścieżki: STALE_FEED z adaptera (luka między
   tickami, wykrywana przy NASTĘPNYM ticku) oraz heartbeat (własny task), który
   łapie przypadek, gdy feed po prostu MILKNIE i następny tick nigdy nie przyjdzie
@@ -35,6 +40,11 @@ class Monitor:
         self._last_tick_wall: float | None = None
         self._stopped = False
         self._hb_task: asyncio.Task | None = None
+        # dzienna baza NETTO: strata liczona jako delta od początku doby (UTC),
+        # nie skumulowana od startu procesu
+        self._day: int | None = None
+        self._baseline_net = 0.0
+        self._last_net = 0.0
 
     def attach(self, bus: EventBus) -> None:
         self._bus = bus
@@ -59,8 +69,25 @@ class Monitor:
         snap = event.payload
         if not isinstance(snap, PnLSnapshot) or self._bus is None or self._stopped:
             return
-        if self.max_daily_loss_usd is not None and snap.realized <= -self.max_daily_loss_usd:
-            await self._emergency(event.ts, f"dzienny limit straty {snap.realized:.2f}$")
+        # przełom doby (UTC, po ts eventu — deterministyczne w testach/backteście):
+        # baza = ostatnie NETTO poprzedniej doby; strata dzienna to delta od bazy
+        day = int(event.ts // 86_400)
+        if self._day is None:
+            self._day = day
+        elif day != self._day:
+            self._day = day
+            self._baseline_net = self._last_net
+        self._last_net = snap.net
+
+        if self.max_daily_loss_usd is None:
+            return
+        day_net = snap.net - self._baseline_net
+        if day_net <= -self.max_daily_loss_usd:
+            await self._emergency(
+                event.ts,
+                f"dzienny limit straty NETTO {day_net:.2f}$ "
+                f"(realized {snap.realized:+.2f}, unrealized {snap.unrealized:+.2f}, "
+                f"funding {snap.funding_collected:+.2f}, fees {snap.fees_paid:.2f})")
 
     async def _emergency(self, ts: float, reason: str) -> None:
         self._stopped = True

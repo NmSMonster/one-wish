@@ -115,6 +115,31 @@ def test_full_pipeline_opens_closes_and_books_pnl():
     assert "open_positions" in rec and "open_orders" in rec
 
 
+def test_engine_opens_legs_with_equal_base_qty():
+    """Regresja: qty_perp = notional/perp zostawiał resztkową deltę ~basis na
+    KAŻDEJ parze. Hedge znosi się per sztuka — obie nogi tę samą ilość bazową."""
+    from backend.core.events import Event
+    from backend.core.types import RiskDecision, TradeIntent
+    from tests.test_repricing import tick_with
+
+    bus = EventBus()
+    book = PositionBook()
+    engine = ExecutionEngine(PaperBrokerAdapter(slippage_bps=0.0), book, clock=SimClock())
+    engine.attach(bus)
+    t = tick_with(60.0)                       # perp 60bps nad spotem (widoczny basis)
+
+    async def run():
+        await bus.publish(Event(EventType.MARKET_TICK, 1.0, "s", payload=t))
+        await bus.publish(Event(EventType.RISK_APPROVED, 1.0, "r", payload={
+            "intent": TradeIntent(Asset.BTC, 1.0, "OPEN", 60_000.0, 5.0),
+            "decision": RiskDecision(approved=True, ts=1.0)}))
+
+    asyncio.run(run())
+    pos = book.position(Asset.BTC)
+    assert abs(pos.net_delta) < 1e-12         # zero resztkowej delty (nie ~basis)
+    assert abs(pos.spot_qty + pos.perp_qty) < 1e-12
+
+
 def test_engine_closes_at_current_market_price():
     """Regresja P0 (poziom silnika): CLOSE musi iść po cenie z OSTATNIEGO ticka,
     nie po cenie wejścia. Wejście @60000/60000; rynek przesuwa się na spot 66000 /

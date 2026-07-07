@@ -87,6 +87,74 @@ def test_report_includes_unrealized_mark_to_market():
     assert rep0.unrealized == 0.0
 
 
+def test_monitor_triggers_on_unrealized_drawdown():
+    """KLUCZOWA regresja: dla delta-neutral carry realized ≈ 0 przez cały czas
+    trzymania — realny drawdown (rozjazd basis) siedzi w UNREALIZED. Guard patrzący
+    tylko na realized NIGDY by go nie zauważył. Teraz: limit liczy NETTO."""
+    bus = EventBus()
+    stops: list = []
+    bus.subscribe(EventType.EMERGENCY_STOP, lambda e: stops.append(e.payload))
+    Monitor(bus, max_daily_loss_usd=50.0).attach(bus)
+
+    async def run():
+        # realized 0, ale unrealized -60 (rozjazd basis na trzymanej parze)
+        await bus.publish(Event(EventType.PNL_UPDATE, 1.0, "e",
+                                payload=PnLSnapshot(1.0, 0.0, -60.0, 0.0, 0.0)))
+
+    asyncio.run(run())
+    assert len(stops) == 1
+    assert "NETTO" in stops[0]["reason"]
+
+
+def test_monitor_daily_loss_resets_on_day_rollover():
+    """Limit jest DZIENNY: -40$ wczoraj + -40$ dziś (delta) NIE łamie limitu 50$,
+    choć skumulowane -80$ by łamało. Bez rolloveru bot na drugi dzień byłby
+    zablokowany wczorajszą stratą."""
+    bus = EventBus()
+    stops: list = []
+    bus.subscribe(EventType.EMERGENCY_STOP, lambda e: stops.append(e.payload))
+    Monitor(bus, max_daily_loss_usd=50.0).attach(bus)
+    day = 86_400.0
+
+    async def run():
+        await bus.publish(Event(EventType.PNL_UPDATE, 10.0, "e",
+                                payload=PnLSnapshot(10.0, -40.0, 0.0, 0.0, 0.0)))     # dzień 0: -40
+        await bus.publish(Event(EventType.PNL_UPDATE, day + 10.0, "e",
+                                payload=PnLSnapshot(day + 10.0, -80.0, 0.0, 0.0, 0.0)))  # dzień 1: delta -40
+
+    asyncio.run(run())
+    assert stops == []                       # żadna DOBA nie przekroczyła -50
+
+
+def test_risk_daily_counters_roll_over():
+    """RiskManager: realized_pnl_today i trades_today resetują się na przełomie
+    doby — wcześniej reset_day() nie był nigdy wołany, a _on_pnl nadpisywał
+    licznik SKUMULOWANYM realized (dzienny limit stawał się limitem od startu)."""
+    from backend.core.types import PnLSnapshot as Snap
+    from backend.risk import RiskManager
+    from tests.test_funding import btc_tick
+
+    rm = RiskManager(_generous(), clock=SimClock())
+    bus = EventBus()
+    rm.attach(bus)
+    day = 86_400.0
+
+    async def run():
+        # dzień 0: strata -40 (skumulowana = -40)
+        await bus.publish(Event(EventType.PNL_UPDATE, 10.0, "e",
+                                payload=Snap(10.0, -40.0, 0.0, 0.0, 0.0)))
+        assert rm.realized_pnl_today == -40.0
+        # dzień 1: tick przewraca dobę, potem kolejna strata do -70 skumulowanej
+        await bus.publish(Event(EventType.MARKET_TICK, day + 5.0, "s",
+                                payload=btc_tick(day + 5.0, day + 100.0)))
+        assert rm.realized_pnl_today == 0.0          # świeża doba
+        await bus.publish(Event(EventType.PNL_UPDATE, day + 10.0, "e",
+                                payload=Snap(day + 10.0, -70.0, 0.0, 0.0, 0.0)))
+        assert rm.realized_pnl_today == -30.0        # delta dzisiejsza, nie -70
+
+    asyncio.run(run())
+
+
 def test_monitor_emergency_on_daily_loss():
     bus = EventBus()
     stops: list = []

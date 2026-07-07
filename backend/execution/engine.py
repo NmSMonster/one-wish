@@ -66,8 +66,11 @@ class ExecutionEngine:
         if tick is None:
             return
         ts = self._clock.now()
-        qty_spot = intent.notional_usd / tick.spot
-        qty_perp = intent.notional_usd / tick.perp
+        # OBIE nogi na TEJ SAMEJ ilości bazowej: hedge znosi się per sztuka
+        # (1 BTC long spota vs 1 BTC short perpa), nie per nominał. Liczenie
+        # qty_perp = notional/perp zostawiało resztkową deltę ~basis na każdej parze.
+        qty = intent.notional_usd / tick.spot
+        qty_spot = qty_perp = qty
         was_open = self.book.is_open(intent.asset)
 
         pair = await self._om.open_pair(intent.asset, qty_spot, qty_perp, tick.spot, tick.perp)
